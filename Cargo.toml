@@ -1,0 +1,7 @@
+[package]
+name = "aodv"
+version = "0.1.0"
+authors = ["Lucas Rooyakkers <lucas.rooyakkers@protonmail.com>"]
+
+[dependencies]
+clap ="2.26.2"

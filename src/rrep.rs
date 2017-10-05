@@ -1,5 +1,5 @@
 use std::net::Ipv4Addr;
-use std::error::Error;
+use std::ops::Deref;
 use functions::*;
 
 /*
@@ -41,32 +41,37 @@ impl RREP {
         if b.len() != 20 {
             return Err("This byte message is not the right size");
         }
-        if b[0] != 1 {
+        if b[0] != 2 {
             return Err("This byte message is not the right type");
         }
-        let r = 1 << 7 & b[1] != 0;
-        let a = 1 << 6 & b[1] != 0;
         // TODO: Fix prefix size!
         Ok(RREP {
-            r: r,
-            a: a,
+            r: 1 << 7 & b[1] != 0,
+            a: 1 << 6 & b[1] != 0,
             prefix_size: b[2],
             hop_count: b[3],
             dest_ip: Ipv4Addr::new(b[4], b[5], b[6], b[7]),
-            dest_seq_num: as_u32_be(&b[8..12]).unwrap(),
+            dest_seq_num: as_u32_be(&b[8..12]),
             orig_ip: Ipv4Addr::new(b[12], b[13], b[14], b[15]),
-            lifetime: as_u32_be(&b[16..30]).unwrap(),
+            lifetime: as_u32_be(&b[16..20]),
         })
     }
 
-    pub fn bit_message<'a>(&'a self) -> &'a[u8] {
-        let 'a bytes= &[
-            2,
-            if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 },
-            self.prefix_size % 32,
-            self.hop_count,
+    pub fn bit_message(&self) -> Box<[u8]> {
+        let mut b = [0u8; 20];
+        b[0] = 2;
+        b[1] = if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 };
+        // TODO: fix this value!
+        b[2] = self.prefix_size;
+        b[3] = self.hop_count;
 
-        ]
+        for i in 0..4 {
+            b[i + 4] = self.dest_ip.octets()[i];
+            b[i + 8] = u32_as_bytes_be(self.dest_seq_num)[i];
+            b[i + 12] = self.orig_ip.octets()[i];
+            b[i + 16] = u32_as_bytes_be(self.lifetime)[i];
+        }
+        Box::new(b)
     }
 }
 
@@ -82,6 +87,7 @@ fn test_rrep_encoding() {
         orig_ip: Ipv4Addr::new(192, 168, 10, 19),
         lifetime: 32603,
     };
+
     let bytes: &[u8] = &[
         2,
         128,
@@ -100,11 +106,11 @@ fn test_rrep_encoding() {
         10,
         19,
         0,
-        4,
-        250,
-        59,
-        ];
+        0,
+        127,
+        91,
+    ];
 
-    assert_eq!(bytes, rrep.bitMessage());
-    //assert_eq!(rrep, RREP::new(bytes).unwrap())
+    assert_eq!(bytes, rrep.bit_message().deref());
+    assert_eq!(rrep, RREP::new(bytes).unwrap())
 }

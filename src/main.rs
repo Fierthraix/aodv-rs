@@ -1,6 +1,7 @@
 mod parse;
 mod server;
 mod rrep;
+mod rreq;
 mod functions;
 
 fn main() {
@@ -9,7 +10,7 @@ fn main() {
     if args.is_present("start_aodv") {
         //go server()
         //go tcpServer()
-        aodvd
+        server::aodv();
     }
 
 }

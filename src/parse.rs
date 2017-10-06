@@ -26,12 +26,9 @@ pub fn get_args() -> ArgMatches<'static> {
                 .help("The port to run the tcp server on.")
                 .takes_value(true),
         )
-        .arg(
-            Arg::with_name("start_aodv")
-                .short("s")
-                .long("start")
-                .value_name("start_aodv"),
-        )
+        .arg(Arg::with_name("start_aodv").short("s").long("start").help(
+            "Start the aodv daemon",
+        ))
         .arg(
             Arg::with_name("current_ip")
                 .long("ip")

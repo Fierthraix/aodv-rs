@@ -61,7 +61,7 @@ impl RREQ {
             orig_seq_num: as_u32_be(&b[20..24]),
         })
     }
-    pub fn bit_message(&self) -> Box<[u8]> {
+    pub fn bit_message(&self) -> [u8; 24] {
         let mut b = [0u8; 24];
         b[0] = 1;
         b[1] = if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
@@ -77,8 +77,7 @@ impl RREQ {
             b[i + 16] = self.orig_ip.octets()[i];
             b[i + 20] = u32_as_bytes_be(self.orig_seq_num)[i];
         }
-
-        Box::new(b)
+        b
     }
 }
 
@@ -97,6 +96,7 @@ fn test_rreq_encoding() {
         orig_ip: Ipv4Addr::new(192, 168, 10, 19),
         orig_seq_num: 63,
     };
+
     let bytes: &[u8] = &[
         1,
         168,
@@ -123,6 +123,6 @@ fn test_rreq_encoding() {
         0,
         63,
     ];
-    assert_eq!(bytes, rreq.bit_message().deref());
+    assert_eq!(bytes, rreq.bit_message());
     assert_eq!(rreq, RREQ::new(bytes).unwrap())
 }

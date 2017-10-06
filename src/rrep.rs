@@ -57,7 +57,7 @@ impl RREP {
         })
     }
 
-    pub fn bit_message(&self) -> Box<[u8]> {
+    pub fn bit_message(&self) -> [u8; 20] {
         let mut b = [0u8; 20];
         b[0] = 2;
         b[1] = if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 };
@@ -71,7 +71,7 @@ impl RREP {
             b[i + 12] = self.orig_ip.octets()[i];
             b[i + 16] = u32_as_bytes_be(self.lifetime)[i];
         }
-        Box::new(b)
+        b
     }
 }
 
@@ -111,6 +111,6 @@ fn test_rrep_encoding() {
         91,
     ];
 
-    assert_eq!(bytes, rrep.bit_message().deref());
+    assert_eq!(bytes, rrep.bit_message());
     assert_eq!(rrep, RREP::new(bytes).unwrap())
 }

@@ -2,6 +2,7 @@ mod parse;
 mod server;
 mod rrep;
 mod rreq;
+mod rerr;
 mod functions;
 
 fn main() {

@@ -1,7 +1,21 @@
 [package]
 name = "aodv"
 version = "0.1.0"
-authors = ["Lucas Rooyakkers <lucas.rooyakkers@protonmail.com>"]
+authors = ["Lucas Rooyakkers <lucas.rooyakkers@drdc.rddc.gc.ca>"]
 
 [dependencies]
-clap ="2.26.2"
+futures = "0.1.14"
+futures-cpupool = "0.1"
+bytes = "0.4"
+tokio-io = "0.1"
+tokio-core = "0.1"
+tokio-proto = "0.1"
+tokio-service = "0.1"
+tokio-timer = "0.1"
+yaml-rust="0.3"
+tempdir="0.3"
+log="0.3"
+iptables = "0.2"
+num_cpus = "1.0"
+rayon = "0.8.2"
+clap= "*"

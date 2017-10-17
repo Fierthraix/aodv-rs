@@ -1,3 +1,5 @@
+use aodv::*;
+
 use std::net::Ipv4Addr;
 use std::ops::Deref;
 use functions::*;
@@ -37,12 +39,14 @@ pub struct RREP {
 
 impl RREP {
     // TODO: recode this to have a parse error or something
-    pub fn new(b: &[u8]) -> Result<RREP, &'static str> {
+    pub fn new(b: &[u8]) -> Result<RREP, ParseError> {
         if b.len() != 20 {
-            return Err("This byte message is not the right size");
+            //return Err("This byte message is not the right size");
+            return Err(ParseError);
         }
         if b[0] != 2 {
-            return Err("This byte message is not the right type");
+            //return Err("This byte message is not the right type");
+            return Err(ParseError);
         }
         // TODO: Fix prefix size!
         Ok(RREP {
@@ -57,8 +61,8 @@ impl RREP {
         })
     }
 
-    pub fn bit_message(&self) -> [u8; 20] {
-        let mut b = [0u8; 20];
+    pub fn bit_message(&self) -> Vec<u8> {
+        let mut b = Vec::with_capacity(20);
         b[0] = 2;
         b[1] = if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 };
         // TODO: fix this value!
@@ -73,6 +77,8 @@ impl RREP {
         }
         b
     }
+
+    pub fn handle_message(&self) {}
 }
 
 #[test]

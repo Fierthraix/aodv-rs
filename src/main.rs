@@ -1,9 +1,12 @@
+mod aodv;
 mod parse;
 mod server;
-mod rrep;
 mod rreq;
+mod rrep;
 mod rerr;
 mod functions;
+
+use aodv::*;
 
 fn main() {
     let args = parse::get_args();
@@ -13,5 +16,4 @@ fn main() {
         //go tcpServer()
         server::aodv();
     }
-
 }

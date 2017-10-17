@@ -1,3 +1,5 @@
+use aodv::*;
+
 use std::net::Ipv4Addr;
 use std::ops::Deref;
 use functions::*;
@@ -40,12 +42,14 @@ pub struct RREQ {
 }
 
 impl RREQ {
-    pub fn new(b: &[u8]) -> Result<RREQ, &'static str> {
+    pub fn new(b: &[u8]) -> Result<RREQ, ParseError> {
         if b.len() != 24 {
-            return Err("This message is not the right size");
+            //   return Err("This message is not the right size");
+            return Err(ParseError {});
         }
         if b[0] != 1 {
-            return Err("This byte message is not the right type");
+            //  return Err("This byte message is not the right type");
+            return Err(ParseError {});
         }
         Ok(RREQ {
             j: 1 << 7 & b[1] != 0,
@@ -61,8 +65,8 @@ impl RREQ {
             orig_seq_num: as_u32_be(&b[20..24]),
         })
     }
-    pub fn bit_message(&self) -> [u8; 24] {
-        let mut b = [0u8; 24];
+    pub fn bit_message(&self) -> Vec<u8> {
+        let mut b = Vec::with_capacity(24);
         b[0] = 1;
         b[1] = if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
             if self.g { 1 << 5 } else { 0 } + if self.d { 1 << 4 } else { 0 } +
@@ -79,6 +83,7 @@ impl RREQ {
         }
         b
     }
+    pub fn handle_message(&self) {}
 }
 
 #[test]

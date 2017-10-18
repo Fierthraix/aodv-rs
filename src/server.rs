@@ -5,19 +5,11 @@ use futures::{Future, Poll};
 use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 
-pub fn aodv() {}
+use parse::Config;
+use routing::RoutingTable;
 
-pub fn server() {}
+pub fn aodv(config: &Config, routing_table: RoutingTable) {}
+
+pub fn server(config: &Config) {}
 
 struct Server;
-
-/*
-impl Future for Server {
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        Ok(())
-    }
-}
-*/

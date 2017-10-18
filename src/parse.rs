@@ -43,9 +43,9 @@ pub struct Config {
     TTL_VALUE: usize,
 }
 
+//TODO: add tests for everything
 impl Config {
     pub fn new(args: &ArgMatches) -> Self {
-        //TODO: add tests for everything
         // Load the default config
         let mut config = Config::default_config();
 

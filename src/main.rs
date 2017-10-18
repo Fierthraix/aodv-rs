@@ -24,8 +24,9 @@ fn main() {
         // Initialize routing table here; clone for each function/thread it's needed in
         let routing_table = RoutingTable::new();
 
-        //go server()
+        server::server(&config);
         //go tcpServer()
-        //server::aodv();
+
+        server::aodv(&config, routing_table.clone());
     }
 }

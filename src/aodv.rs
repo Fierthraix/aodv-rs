@@ -22,33 +22,44 @@ impl fmt::Display for ParseError {
     }
 }
 
-pub fn parse_aodv_message(b: &[u8]) -> Result<(), ParseError> {
-    if b.len() == 0 {
-        return Err(ParseError {});
-    }
-    match (b[0], b.len(), b.len() % 4) {
-        (1, 24, 0) => match RREQ::new(b) {
-            Ok(r) => Ok(r.handle_message()),
-            Err(e) => Err(e)
-        },
-        (2, 20, 0) => match RREP::new(b){
-            Ok(r) => Ok(r.handle_message()),
-            Err(e) => Err(e)
-        },
-        (3, _, 0) => match RERR::new(b){
-            Ok(r) => Ok(r.handle_message()),
-            Err(e) =>Err(e)
-        },
-        (4,2,2) => {println!("rerr message!");Ok(())},
-        (_,_,_)=>Err(ParseError)
-    }
-}
 
 pub enum AodvMessage {
-    RREQ {
-        n: bool, // No delete flag
-        dest_count: u8, // 8-bit Destination Count
-        udest_list: Vec<(Ipv4Addr, // Unreachable Destination IP Address
-                         u32)>, // Unreachable Destination Sequence Number
+    rreq(RREQ),
+    rrep(RREP),
+    rerr(RERR),
+    hello(RREP),
+    ack,
+}
+
+impl AodvMessage {
+    pub fn parse(b: &[u8]) -> Result<(), ParseError> {
+        if b.len() == 0 {
+            return Err(ParseError {});
+        }
+        match (b[0], b.len(), b.len() % 4) {
+            (1, 24, 0) => {
+                match RREQ::new(b) {
+                    Ok(r) => Ok(r.handle_message()),
+                    Err(e) => Err(e),
+                }
+            }
+            (2, 20, 0) => {
+                match RREP::new(b) {
+                    Ok(r) => Ok(r.handle_message()),
+                    Err(e) => Err(e),
+                }
+            }
+            (3, _, 0) => {
+                match RERR::new(b) {
+                    Ok(r) => Ok(r.handle_message()),
+                    Err(e) => Err(e),
+                }
+            }
+            (4, 2, 2) => {
+                println!("rerr message!");
+                Ok(())
+            }
+            (_, _, _) => Err(ParseError),
+        }
     }
 }

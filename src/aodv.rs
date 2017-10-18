@@ -22,13 +22,12 @@ impl fmt::Display for ParseError {
     }
 }
 
-
 pub enum AodvMessage {
-    rreq(RREQ),
-    rrep(RREP),
-    rerr(RERR),
-    hello(RREP),
-    ack,
+    Rreq(RREQ),
+    Rrep(RREP),
+    Rerr(RERR),
+    Hello(RREP),
+    Ack,
 }
 
 impl AodvMessage {

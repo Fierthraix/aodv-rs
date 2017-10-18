@@ -21,7 +21,7 @@ pub struct RREP {
     pub lifetime: u32, //Lifetime in milliseconds
 }
 
-pub struct RoutingTable(Arc<Mutex<HashMap<Ipv4Addr, String>>>);
+pub struct RoutingTable(Arc<Mutex<HashMap<Ipv4Addr, Route>>>);
 
 impl RoutingTable {
     pub fn new() -> Self {

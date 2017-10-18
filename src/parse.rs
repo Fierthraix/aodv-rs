@@ -238,14 +238,6 @@ pub fn get_args() -> ArgMatches<'static> {
         )
         .get_matches();
 
-    // Check inputs are valid
-
-    // TODO: Checkout Ipv4Addr::is_broadcast -> bool
-
-    /*
-     * Validate input before returning
-     */
-
     // Run this if value is not None
     if let Some(ip_str) = matches.value_of("current_ip") {
         // Check for valid ipv4 address
@@ -257,23 +249,3 @@ pub fn get_args() -> ArgMatches<'static> {
 
     matches
 }
-
-//10.
-const DEFAULT_CONFIG: &'static str = r#"
-Interface: "wlan0"
-BroadcastAddress: "192.168.10.255"
-Port: 1200
-ACTIVE_ROUTE_TIMEOUT: 3000 # milliseconds
-ALLOWED_HELLO_LOSS: 2
-HELLO_INTERVAL: 1000 # milliseconds
-LOCAL_ADD_TTL: 2
-NET_DIAMETER: 35
-NODE_TRAVERSAL_TIME: 40 # milliseconds
-RERR_RATELIMIT: 10 # messages per second
-RREQ_RETRIES: 2
-RREQ_RATELIMIT: 10 # messages per second
-TIMEOUT_BUFFER: 2
-TTL_START: 1
-TTL_INCREMENT: 2
-TTL_THRESHOLD: 7
-"#;

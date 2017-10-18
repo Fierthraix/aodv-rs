@@ -63,18 +63,19 @@ impl RREP {
 
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(20);
-        b[0] = 2;
-        b[1] = if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 };
+        b.push(2);
+        b.push(
+            if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 },
+        );
         // TODO: fix this value!
-        b[2] = self.prefix_size;
-        b[3] = self.hop_count;
+        b.push(self.prefix_size);
+        b.push(self.hop_count);
 
-        for i in 0..4 {
-            b[i + 4] = self.dest_ip.octets()[i];
-            b[i + 8] = u32_as_bytes_be(self.dest_seq_num)[i];
-            b[i + 12] = self.orig_ip.octets()[i];
-            b[i + 16] = u32_as_bytes_be(self.lifetime)[i];
-        }
+        b.extend(self.dest_ip.octets().iter());
+        b.extend(u32_as_bytes_be(self.dest_seq_num).iter());
+        b.extend(self.orig_ip.octets().iter());
+        b.extend(u32_as_bytes_be(self.lifetime).iter());
+
         b
     }
 
@@ -117,6 +118,6 @@ fn test_rrep_encoding() {
         91,
     ];
 
-    assert_eq!(bytes, rrep.bit_message());
+    assert_eq!(bytes.to_vec(), rrep.bit_message());
     assert_eq!(rrep, RREP::new(bytes).unwrap())
 }

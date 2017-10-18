@@ -1,7 +1,6 @@
 use aodv::*;
 
 use std::net::Ipv4Addr;
-use std::ops::Deref;
 use functions::*;
 
 /*
@@ -67,20 +66,24 @@ impl RREQ {
     }
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(24);
-        b[0] = 1;
-        b[1] = if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
-            if self.g { 1 << 5 } else { 0 } + if self.d { 1 << 4 } else { 0 } +
-            if self.u { 1 << 3 } else { 0 };
+        b.push(1);
+        b.push(
+            if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
+                if self.g { 1 << 5 } else { 0 } + if self.d { 1 << 4 } else { 0 } +
+                if self.u { 1 << 3 } else { 0 },
+        );
+        b.push(0); // Reserved space
 
-        b[3] = self.hop_count;
+        b.push(self.hop_count);
 
-        for i in 0..4 {
-            b[i + 4] = u32_as_bytes_be(self.rreq_id)[i];
-            b[i + 8] = self.dest_ip.octets()[i];
-            b[i + 12] = u32_as_bytes_be(self.dest_seq_num)[i];
-            b[i + 16] = self.orig_ip.octets()[i];
-            b[i + 20] = u32_as_bytes_be(self.orig_seq_num)[i];
-        }
+        b.extend(u32_as_bytes_be(self.rreq_id).iter());
+
+        b.extend(self.dest_ip.octets().iter());
+        b.extend(u32_as_bytes_be(self.dest_seq_num).iter());
+
+        b.extend(self.orig_ip.octets().iter());
+        b.extend(u32_as_bytes_be(self.orig_seq_num).iter());
+
         b
     }
     pub fn handle_message(&self) {}
@@ -128,6 +131,6 @@ fn test_rreq_encoding() {
         0,
         63,
     ];
-    assert_eq!(bytes, rreq.bit_message());
+    assert_eq!(bytes.to_vec(), rreq.bit_message());
     assert_eq!(rreq, RREQ::new(bytes).unwrap())
 }

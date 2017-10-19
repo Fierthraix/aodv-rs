@@ -233,6 +233,7 @@ pub fn get_args() -> ArgMatches<'static> {
             Arg::with_name("config_file")
                 .short("c")
                 .long("config")
+                .value_name("CONFIG FILE")
                 .help("Alternate config file")
                 .takes_value(true),
         )

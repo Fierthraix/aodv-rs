@@ -35,6 +35,7 @@ impl AodvMessage {
         if b.len() == 0 {
             return Err(ParseError {});
         }
+        // Type, Length, Multiple of 4
         match (b[0], b.len(), b.len() % 4) {
             (1, 24, 0) => {
                 match RREQ::new(b) {

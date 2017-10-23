@@ -11,8 +11,11 @@ impl RoutingTable {
         RoutingTable(Arc::new(Mutex::new(HashMap::new())))
     }
     pub fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Route>> {
-        //TODO: Handle this unwrap
-        self.0.lock().unwrap()
+        //self.0.lock().unwrap()
+        match self.0.lock() {
+            Ok(r) => r,
+            Err(_) => panic!("Error locking Routing Table"),
+        }
     }
 }
 

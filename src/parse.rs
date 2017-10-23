@@ -110,7 +110,7 @@ impl Config {
         let doc = &yaml_file[0];
 
         // TODO use an iter() here or something more generic
-        // TODO: Use log error reporting when somethign fails
+        // TODO: Use log error reporting when something fails
 
         // Replace appropriate arguments
         doc["Interface"].as_str().map(|x| {
@@ -249,4 +249,28 @@ pub fn get_args() -> ArgMatches<'static> {
     }
 
     matches
+}
+
+#[test]
+fn test_parse_config() {
+
+    let config = r#"
+Interface: "wlan1"
+BroadcastAddress: "192.168.10.251"
+Port: 1201
+ACTIVE_ROUTE_TIMEOUT: 3001 # milliseconds
+ALLOWED_HELLO_LOSS: 3
+HELLO_INTERVAL: 1001 # milliseconds
+LOCAL_ADD_TTL: 3
+NET_DIAMETER: 36
+NODE_TRAVERSAL_TIME: 41 # milliseconds
+RERR_RATELIMIT: 11 # messages per second
+RREQ_RETRIES: 3
+RREQ_RATELIMIT: 11 # messages per second
+TIMEOUT_BUFFER: 3
+TTL_START: 2
+TTL_INCREMENT: 3
+TTL_THRESHOLD: 8
+"#;
+
 }

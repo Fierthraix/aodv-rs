@@ -15,5 +15,6 @@ pub fn u32_as_bytes_be(n: u32) -> [u8; 4] {
 
 #[test]
 fn test_conversions() {
-    assert_eq!(as_u32_be(&u32_as_bytes_be(19381837)), 19381837)
+    let b = 19381837;
+    assert_eq!(as_u32_be(&u32_as_bytes_be(b)), b)
 }

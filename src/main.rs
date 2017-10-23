@@ -15,10 +15,13 @@ mod routing;
 
 
 fn main() {
+    // Get command line arguments
     let args = parse::get_args();
 
+    // Generate config object based on those
     let config = Config::new(&args);
 
+    // Start server
     if args.is_present("start_aodv") {
 
         // Initialize routing table here; clone for each function/thread it's needed in

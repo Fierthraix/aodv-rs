@@ -46,7 +46,7 @@ impl RERR {
         let mut i = 4;
         while i < b.len(){
             udest_list.push((Ipv4Addr::new(b[i],b[i+1],b[i+2],b[i+3]),
-            as_u32_be(&b[i+4..i+8])));
+            bytes_as_u32_be(&b[i+4..i+8])));
             i+=8;
         }
 

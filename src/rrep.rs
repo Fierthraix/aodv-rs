@@ -55,9 +55,9 @@ impl RREP {
             prefix_size: b[2],
             hop_count: b[3],
             dest_ip: Ipv4Addr::new(b[4], b[5], b[6], b[7]),
-            dest_seq_num: as_u32_be(&b[8..12]),
+            dest_seq_num: bytes_as_u32_be(&b[8..12]),
             orig_ip: Ipv4Addr::new(b[12], b[13], b[14], b[15]),
-            lifetime: as_u32_be(&b[16..20]),
+            lifetime: bytes_as_u32_be(&b[16..20]),
         })
     }
 

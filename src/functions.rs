@@ -1,5 +1,3 @@
-//Probably want to inline these conversions
-
 // Convert big endian bytes to a u32
 #[inline]
 pub fn as_u32_be(slice: &[u8]) -> u32 {

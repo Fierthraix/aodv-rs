@@ -251,6 +251,7 @@ pub fn get_args() -> ArgMatches<'static> {
     matches
 }
 
+//TODO: make this test run by accepting an enum of file or string or something
 #[test]
 fn test_parse_config() {
 

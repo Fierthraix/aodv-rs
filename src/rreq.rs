@@ -57,11 +57,11 @@ impl RREQ {
             d: 1 << 4 & b[1] != 0,
             u: 1 << 3 & b[1] != 0,
             hop_count: b[3],
-            rreq_id: as_u32_be(&b[4..8]),
+            rreq_id: bytes_as_u32_be(&b[4..8]),
             dest_ip: Ipv4Addr::new(b[8], b[9], b[10], b[11]),
-            dest_seq_num: as_u32_be(&b[12..16]),
+            dest_seq_num: bytes_as_u32_be(&b[12..16]),
             orig_ip: Ipv4Addr::new(b[16], b[17], b[18], b[19]),
-            orig_seq_num: as_u32_be(&b[20..24]),
+            orig_seq_num: bytes_as_u32_be(&b[20..24]),
         })
     }
     pub fn bit_message(&self) -> Vec<u8> {

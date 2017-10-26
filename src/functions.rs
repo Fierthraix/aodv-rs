@@ -1,6 +1,6 @@
 // Convert big endian bytes to a u32
 #[inline]
-pub fn as_u32_be(slice: &[u8]) -> u32 {
+pub fn bytes_as_u32_be(slice: &[u8]) -> u32 {
     ((slice[0] as u32) << 24) + ((slice[1] as u32) << 16) + ((slice[2] as u32) << 8) +
         ((slice[3] as u32) << 0)
 }
@@ -14,5 +14,5 @@ pub fn u32_as_bytes_be(n: u32) -> [u8; 4] {
 #[test]
 fn test_conversions() {
     let b = 19381837;
-    assert_eq!(as_u32_be(&u32_as_bytes_be(b)), b)
+    assert_eq!(bytes_as_u32_be(&u32_as_bytes_be(b)), b)
 }

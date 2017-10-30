@@ -167,14 +167,14 @@ impl Config {
 
     fn read_args(&mut self, args: &ArgMatches) {
         args.value_of("current_ip").map(
-            |x| if Ipv4Addr::from_str(x)
-                .is_ok()
-            {
-                self.current_ip = Ipv4Addr::from_str(x).unwrap();
+            |x| match Ipv4Addr::from_str(x) {
+                Ok(ip) => self.current_ip = ip,
+                _ => {}
             },
         );
-        args.value_of("port").map(|x| if x.parse::<u16>().is_ok() {
-            self.port = x.parse::<u16>().unwrap();
+        args.value_of("port").map(|x| match x.parse::<u16>() {
+            Ok(port) => self.port = port,
+            _ => {}
         });
     }
 

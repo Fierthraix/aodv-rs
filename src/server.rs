@@ -51,5 +51,3 @@ pub fn server(config: &Config) {
 
     //TODO: Handle messages from spun up instances
 }
-
-struct Server;

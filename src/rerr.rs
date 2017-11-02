@@ -1,7 +1,7 @@
 use aodv::*;
 
+use std::io::Error;
 use std::net::Ipv4Addr;
-use std::ops::Deref;
 use functions::*;
 
 /*
@@ -32,14 +32,14 @@ pub struct RERR {
 }
 
 impl RERR {
-    pub fn new(b: &[u8]) -> Result<RERR, ParseError> {
+    pub fn new(b: &[u8]) -> Result<RERR, Error> {
         if (b.len()-4) % 8 != 0 || b.len() <12 {
             //return Err("This byte message is not the right size");
-            return Err(ParseError);
+            return Err(ParseError::new());
         }
         if b[0] != 3{
             //return Err("This byte message is not the right type");
-            return Err(ParseError);
+            return Err(ParseError::new());
         }
 
         let mut udest_list = Vec::new();

@@ -1,5 +1,6 @@
 use aodv::*;
 
+use std::io::Error;
 use std::net::Ipv4Addr;
 use functions::*;
 
@@ -41,14 +42,14 @@ pub struct RREQ {
 }
 
 impl RREQ {
-    pub fn new(b: &[u8]) -> Result<RREQ, ParseError> {
+    pub fn new(b: &[u8]) -> Result<RREQ, Error> {
         if b.len() != 24 {
             //   return Err("This message is not the right size");
-            return Err(ParseError {});
+            return Err(ParseError::new());
         }
         if b[0] != 1 {
             //  return Err("This byte message is not the right type");
-            return Err(ParseError {});
+            return Err(ParseError::new());
         }
         Ok(RREQ {
             j: 1 << 7 & b[1] != 0,

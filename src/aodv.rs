@@ -46,6 +46,16 @@ impl AodvMessage {
         //TODO Add the real bit message
         return vec![1, 2, 3];
     }
+
+    pub fn handle_message(self, addr: SocketAddr) {
+        match self {
+            AodvMessage::Rreq(r) => r.handle_message(),
+            AodvMessage::Rrep(r) => r.handle_message(),
+            AodvMessage::Rerr(r) => r.handle_message(),
+            AodvMessage::Hello(r) => r.handle_message(),
+            AodvMessage::Ack => println!("Received Ack from {}", addr),
+        }
+    }
 }
 
 pub struct AodvCodec;

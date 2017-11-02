@@ -1,7 +1,7 @@
 AODVD
 =====
 
-AODVD is an implementation of the Ad hoc On-Demand Distance Vector Routing protocol defined by [RFC 3561](https://www.ietf.org/rfc/rfc2561.txt) written in Go. It currently runs on any modern linux kernel.
+AODVD is an implementation of the Ad hoc On-Demand Distance Vector Routing protocol defined by [RFC 3561](https://www.ietf.org/rfc/rfc2561.txt) written in [Rust](https://www.rust-lang.org/). It currently runs on any modern linux kernel.
 
 ## Dependencies
 

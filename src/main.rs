@@ -1,9 +1,10 @@
 extern crate futures;
 extern crate tokio_core;
 
-use std::env::var;
 use std::thread;
+use std::env::var;
 use std::sync::Arc;
+use std::process::exit;
 
 use parse::Config;
 use routing::RoutingTable;
@@ -32,7 +33,8 @@ fn main() {
         match var("USER") {
             Ok(s) => {
                 if s != "root" {
-                    panic!("Must be root to run the server!");
+                    eprintln!("Must be root to run the server!");
+                    exit(1);
                 }
             }
             Err(e) => panic!(e),

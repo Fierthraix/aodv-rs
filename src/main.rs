@@ -1,6 +1,7 @@
 extern crate futures;
 extern crate tokio_core;
 
+use std::env::var;
 use std::thread;
 use std::sync::Arc;
 
@@ -26,6 +27,16 @@ fn main() {
 
     // Start server
     if args.is_present("start_aodv") {
+
+        // Check user is root
+        match var("USER") {
+            Ok(s) => {
+                if s != "root" {
+                    panic!("Must be root to run the server!");
+                }
+            }
+            Err(e) => panic!(e),
+        }
 
         // Initialize routing table here; clone for each function/thread it's needed in
         let routing_table = RoutingTable::new();

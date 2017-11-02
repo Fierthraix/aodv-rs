@@ -1,4 +1,4 @@
-use std::{env, io};
+use std::io;
 use std::net::SocketAddr;
 
 use futures::{Future, Poll};
@@ -9,7 +9,6 @@ use parse::Config;
 use routing::RoutingTable;
 
 pub fn aodv(config: &Config, routing_table: RoutingTable) {
-    //TODO: Check user is root
 
     //TODO: Check port is being used
 

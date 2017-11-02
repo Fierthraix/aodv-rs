@@ -42,9 +42,14 @@ impl AodvMessage {
             (_, _, _) => Err(ParseError::new()),
         }
     }
-    pub fn bit_message() -> Vec<u8> {
-        //TODO Add the real bit message
-        return vec![1, 2, 3];
+    pub fn bit_message(&self) -> Vec<u8> {
+        match self {
+            &AodvMessage::Rreq(ref r) => r.bit_message(),
+            &AodvMessage::Rrep(ref r) => r.bit_message(),
+            &AodvMessage::Rerr(ref r) => r.bit_message(),
+            &AodvMessage::Hello(ref r) => r.bit_message(),
+            &AodvMessage::Ack => vec![4, 0],
+        }
     }
 
     pub fn handle_message(self, addr: SocketAddr) {
@@ -69,8 +74,7 @@ impl UdpCodec for AodvCodec {
     }
 
     fn encode(&mut self, (addr, msg): Self::Out, into: &mut Vec<u8>) -> SocketAddr {
-        //TODO: fix this
-        into.extend(vec![1, 2, 3]);
+        into.extend(msg.bit_message());
         addr
     }
 }

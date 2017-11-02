@@ -1,6 +1,9 @@
 extern crate futures;
 extern crate tokio_core;
 
+use std::thread;
+use std::sync::Arc;
+
 use parse::Config;
 use routing::RoutingTable;
 
@@ -19,7 +22,7 @@ fn main() {
     let args = parse::get_args();
 
     // Generate config object based on those
-    let config = Config::new(&args);
+    let config = Arc::new(Config::new(&args));
 
     // Start server
     if args.is_present("start_aodv") {
@@ -27,9 +30,18 @@ fn main() {
         // Initialize routing table here; clone for each function/thread it's needed in
         let routing_table = RoutingTable::new();
 
-        server::server(&config);
+        //TODO: use tokio or something
+        // Start internal server
+        let _config = Arc::clone(&config);
+        let handle = thread::spawn(move || {
+            let config = _config;
+            server::server(&config);
+        });
+
         //go tcpServer()
 
         server::aodv(&config, routing_table.clone());
+
+        handle.join().unwrap();
     }
 }

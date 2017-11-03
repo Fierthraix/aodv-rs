@@ -12,7 +12,7 @@ use routing::RoutingTable;
 const AODV_PORT: u16 = 654;
 const INSTANCE_PORT: u16 = 15292;
 
-/// Outward AOV server
+/// Outward AODV server
 pub fn aodv(config: &Config, routing_table: RoutingTable) {
 
     // Get address

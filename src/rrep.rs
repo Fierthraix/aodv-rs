@@ -38,7 +38,7 @@ pub struct RREP {
 }
 
 impl RREP {
-    // TODO: recode this to have a parse error or something
+    /// Return a RREP message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREP, Error> {
         if b.len() != 20 {
             //return Err("This byte message is not the right size");
@@ -48,10 +48,10 @@ impl RREP {
             //return Err("This byte message is not the right type");
             return Err(ParseError::new());
         }
-        // TODO: Fix prefix size!
         Ok(RREP {
             r: 1 << 7 & b[1] != 0,
             a: 1 << 6 & b[1] != 0,
+            // TODO: Fix prefix size!
             prefix_size: b[2],
             hop_count: b[3],
             dest_ip: Ipv4Addr::new(b[4], b[5], b[6], b[7]),
@@ -60,7 +60,7 @@ impl RREP {
             lifetime: bytes_as_u32_be(&b[16..20]),
         })
     }
-
+    /// Return the bit field representation of a RREP message
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(20);
         b.push(2);

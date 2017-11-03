@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+/// The object that holds both user-set variables and aodv constants
 #[allow(non_snake_case)]
 pub struct Config {
     current_ip: Ipv4Addr,
@@ -45,6 +46,7 @@ pub struct Config {
 
 //TODO: add tests for everything
 impl Config {
+    /// Get the global config using both a .yaml file and the command line input
     pub fn new(args: &ArgMatches) -> Self {
         // Load the default config
         let mut config = Config::default_config();
@@ -204,7 +206,7 @@ impl Config {
     }
 }
 
-//  Parse the command line arguments
+///  Parse the command line arguments or print help/usage information
 pub fn get_args() -> ArgMatches<'static> {
     let matches = App::new("aodv")
         .version("0.0.1")

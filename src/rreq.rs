@@ -42,6 +42,7 @@ pub struct RREQ {
 }
 
 impl RREQ {
+    /// Return a RREQ message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREQ, Error> {
         if b.len() != 24 {
             //   return Err("This message is not the right size");
@@ -65,6 +66,7 @@ impl RREQ {
             orig_seq_num: bytes_as_u32_be(&b[20..24]),
         })
     }
+    /// Return the bit field representation of a RREQ message
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(24);
         b.push(1);

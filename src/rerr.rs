@@ -32,6 +32,7 @@ pub struct RERR {
 }
 
 impl RERR {
+    /// Return a RERR message from a byte slice
     pub fn new(b: &[u8]) -> Result<RERR, Error> {
         if (b.len()-4) % 8 != 0 || b.len() <12 {
             //return Err("This byte message is not the right size");
@@ -56,7 +57,7 @@ impl RERR {
             udest_list: udest_list,
         })
     }
-
+    /// Return the bit field representation of a RERR message
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(4+8*self.dest_count as usize);
         b.push(3);

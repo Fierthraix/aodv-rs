@@ -3,10 +3,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use std::net::Ipv4Addr;
 
+/// The internal representation of the aodv routing table
 #[derive(Clone)]
 pub struct RoutingTable(Arc<Mutex<HashMap<Ipv4Addr, Route>>>);
 
 impl RoutingTable {
+    /// Instantiate the routing table
     pub fn new() -> Self {
         RoutingTable(Arc::new(Mutex::new(HashMap::new())))
     }

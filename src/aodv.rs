@@ -9,6 +9,7 @@ use rerr::*;
 
 use tokio_core::net::{UdpSocket, UdpCodec};
 
+/// ParseError is an io::Error specifically for when parsing an aodv message fails
 pub struct ParseError;
 
 impl ParseError {
@@ -20,6 +21,7 @@ impl ParseError {
     }
 }
 
+/// The enum for every sort of aodv control message
 pub enum AodvMessage {
     Rreq(RREQ),
     Rrep(RREP),
@@ -63,6 +65,7 @@ impl AodvMessage {
     }
 }
 
+/// The UdpCodec for handling aodv control message through tokio
 pub struct AodvCodec;
 
 impl UdpCodec for AodvCodec {

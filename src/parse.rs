@@ -15,6 +15,7 @@ use std::str::FromStr;
 
 /// The object that holds both user-set variables and aodv constants
 #[allow(non_snake_case)]
+#[derive(Debug, PartialEq)]
 pub struct Config {
     current_ip: Ipv4Addr,
     interface: String,
@@ -54,11 +55,8 @@ impl Config {
         let mut config = Config::default_config();
 
         // Change elements from a config file if supplied
-        match args.value_of("config_file") {
-            Some(file) => {
-                config.read_config(File::open(file).unwrap());
-            }
-            None => (),
+        if let Some(file) = args.value_of("config_file") {
+            config.read_config(File::open(file).unwrap());
         }
 
         // Change any arguments from stdin
@@ -204,7 +202,8 @@ impl Config {
             .checked_add(Duration::from_millis(10))
             .unwrap();
         self.PATH_DISCOVERY_TIME = self.NET_TRAVERSAL_TIME.checked_mul(2).unwrap();
-        self.RING_TRAVERSAL_TIME = self.NODE_TRAVERSAL_TIME;
+        self.RING_TRAVERSAL_TIME = self.NODE_TRAVERSAL_TIME *
+            (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as u32;
     }
 }
 
@@ -243,24 +242,20 @@ pub fn get_args() -> ArgMatches<'static> {
         )
         .get_matches();
 
-    // Run this if value is not None
+    // Validate submitted Ipv4Addr
     if let Some(ip_str) = matches.value_of("current_ip") {
-        // Check for valid ipv4 address
-        match Ipv4Addr::from_str(ip_str) {
-            Ok(_) => {}
-            Err(e) => eprintln!("Error getting IP address: {}", e),
+        if let Err(e) = Ipv4Addr::from_str(ip_str) {
+            eprintln!("incorrectly formatted ip address: {}", e);
         }
     }
 
     matches
 }
 
-//TODO: make this test run by accepting an enum of file or string or something
 #[test]
 fn test_parse_config() {
 
-    let config = r#"
-Interface: "wlan1"
+    let config = r#"Interface: "wlan1"
 BroadcastAddress: "192.168.10.251"
 Port: 1201
 ACTIVE_ROUTE_TIMEOUT: 3001 # milliseconds
@@ -278,4 +273,60 @@ TTL_INCREMENT: 3
 TTL_THRESHOLD: 8
 "#;
 
+    use std::env::temp_dir;
+    use std::fs::{File, remove_file};
+
+    // Save modified config file to tmp file
+
+    let mut tmp = temp_dir();
+    tmp.push("config.yaml");
+
+    // Scope the creation of `c` to automatically close it
+    {
+        let mut c = File::create(&tmp).unwrap();
+        c.write_all(config.as_bytes()).unwrap();
+    }
+
+    // Create default config
+    let mut config1 = Config::default_config();
+    let mut config2 = Config::default_config();
+
+    // Change config1 based on the `.yaml` file
+    config1.read_config(File::open(&tmp).unwrap());
+
+    // Manually calculated chagnes
+    let config2 = Config {
+        interface: String::from("wlan1"),
+        broadcast_address: Ipv4Addr::new(192, 168, 10, 251),
+        current_ip: config1.current_ip,
+        port: 1201,
+        ACTIVE_ROUTE_TIMEOUT: Duration::from_millis(3001),
+        ALLOWED_HELLO_LOSS: 3,
+        BLACKLIST_TIMEOUT: Duration::from_millis(8856),
+        DELETE_PERIOD: Duration::from_millis(15005),
+        HELLO_INTERVAL: Duration::from_millis(1001),
+        LOCAL_ADD_TTL: 3,
+        MIN_REPAIR_TTL: 0,
+        MAX_REPAIR_TTL: config1.MAX_REPAIR_TTL, // Float, subject to error
+        MY_ROUTE_TIMEOUT: Duration::from_millis(6002),
+        NET_DIAMETER: 36,
+        NET_TRAVERSAL_TIME: Duration::from_millis(2952),
+        NEXT_HOP_WAIT: Duration::from_millis(51),
+        NODE_TRAVERSAL_TIME: Duration::from_millis(41),
+        PATH_DISCOVERY_TIME: Duration::from_millis(5904),
+        RERR_RATELIMIT: 11,
+        RING_TRAVERSAL_TIME: Duration::from_millis(246),
+        RREQ_RETRIES: 3,
+        RREQ_RATELIMIT: 11,
+        TIMEOUT_BUFFER: 3,
+        TTL_START: 2,
+        TTL_INCREMENT: 3,
+        TTL_THRESHOLD: 8,
+        TTL_VALUE: 0,
+    };
+
+    assert_eq!(config1, config2);
+
+    // Clean up tmp file
+    remove_file(tmp);
 }

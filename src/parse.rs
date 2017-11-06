@@ -11,6 +11,8 @@ use std::time::Duration;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+//TODO: add lazy static to see if that helps
+
 /// The object that holds both user-set variables and aodv constants
 #[allow(non_snake_case)]
 pub struct Config {

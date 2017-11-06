@@ -140,3 +140,69 @@ fn test_rreq_encoding() {
     assert_eq!(bytes.to_vec(), rreq.bit_message());
     assert_eq!(rreq, RREQ::new(bytes).unwrap())
 }
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+// TODO: remove and use futures and timouts instead
+use std::thread;
+use std::time::Duration;
+
+#[derive(Clone)]
+pub struct RreqDatabase(Arc<Mutex<HashMap<Ipv4Addr, Vec<u32>>>>);
+
+impl RreqDatabase {
+    pub fn new() -> Self {
+        RreqDatabase(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
+    /// of it for PATH_DISCOVERY_TIME
+    pub fn seen_before(&mut self, ip: Ipv4Addr, rreq_id: u32) -> bool {
+        let mut db = self.lock();
+
+        // Try to get the entry for the given ip
+        if !db.contains_key(&ip) {
+            db.insert(ip, vec![rreq_id]);
+            false
+        } else {
+            let v = db.get_mut(&ip).unwrap(); // Unwrap is ok as we just checked for existence
+            if v.contains(&rreq_id) {
+                true
+            // If you haven't seen an ip then add it and begin it's removal timer
+            } else {
+                v.push(rreq_id);
+                // TODO: use futures or something instead of a thread
+                let _db = self.clone();
+                thread::spawn(move || { RreqDatabase::manage_rreq(ip, rreq_id, _db); });
+                false
+            }
+        }
+    }
+
+    fn manage_rreq(ip: Ipv4Addr, rreq_id: u32, db: RreqDatabase) {
+        //TODO: Replace with lookup in config object
+        thread::sleep(Duration::from_millis(500));
+        let mut db = db.lock();
+
+        // Scoped to remove reference to db and allow cleanup code to run
+        {
+            let v = db.get_mut(&ip).unwrap(); // This unwrap *shoudln't* fail, not 100% sure tho
+
+            // Remove the current rreq_id from the list
+            v.retain(|id| id != &rreq_id); // Keep elements that *aren't* equal to rreq_id
+        }
+
+        // Clean up empty hash maps
+        if db.get_mut(&ip).unwrap().len() == 0 {
+            db.remove(&ip);
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {
+        match self.0.lock() {
+            Ok(r) => r,
+            Err(_) => panic!("Error locking rreq database!"),
+        }
+    }
+}

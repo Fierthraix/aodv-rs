@@ -1,4 +1,3 @@
-use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 
 use futures::{Future, Poll, Sink, Stream};
@@ -29,18 +28,19 @@ pub fn aodv(config: &Config, routing_table: RoutingTable) {
     // Get sink/stream for AODV codec
     let (sink, stream) = socket.framed(AodvCodec).split();
 
+    //TODO: find out who server crashes on non-aodv messages
+
     // Handle incoming AODV messages
     let stream = stream
         .map(|(addr, msg)| {
             msg.handle_message(&addr)
         })
-        // Send a reply if need be
-        .filter(|ref outgoing_msg| outgoing_msg.is_some())
-        .and_then(|_| Ok(()));
+    // Send a reply if need be
+    .filter(|ref outgoing_msg| outgoing_msg.is_some()) //TODO: get this using better iterator
+    // Unwrap the option (which we know is some because of the filter)
+    .map(|outgoing_msg| outgoing_msg.unwrap());
 
-    // Start server
-    //TODO: Get this working!
-    //let server = core.run(stream);
+    let _server = core.run(stream.forward(sink).and_then(|_| Ok(())));
 }
 
 /// Internal instance server

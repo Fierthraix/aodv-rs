@@ -1,5 +1,7 @@
 extern crate futures;
 extern crate tokio_core;
+#[macro_use]
+extern crate lazy_static;
 
 use std::thread;
 use std::env::var;
@@ -8,6 +10,7 @@ use std::process::exit;
 
 use parse::Config;
 use routing::RoutingTable;
+use rreq::RreqDatabase;
 
 mod aodv;
 mod parse;
@@ -18,13 +21,15 @@ mod rerr;
 mod functions;
 mod routing;
 
+lazy_static!{
+    static ref routing_table: RoutingTable = RoutingTable::new();
+    static ref rreq_database: RreqDatabase = RreqDatabase::new();
+    static ref config: Config= Config::new(&parse::get_args());
+}
 
 fn main() {
     // Get command line arguments
     let args = parse::get_args();
-
-    // Generate config object based on those
-    let config = Arc::new(Config::new(&args));
 
     // Start server
     if args.is_present("start_aodv") {
@@ -40,20 +45,12 @@ fn main() {
             Err(e) => panic!(e),
         }
 
-        // Initialize routing table here; clone for each function/thread it's needed in
-        let routing_table = RoutingTable::new();
-
-        //TODO: use tokio or something
         // Start internal server
-        let _config = Arc::clone(&config);
-        let handle = thread::spawn(move || {
-            let config = _config;
-            server::server(&config);
-        });
+        let handle = thread::spawn(|| { server::server(); });
 
         //go tcpServer()
 
-        server::aodv(&config, routing_table.clone());
+        server::aodv();
 
         handle.join().unwrap();
     }

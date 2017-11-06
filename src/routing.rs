@@ -1,16 +1,15 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use std::net::Ipv4Addr;
 
 /// The internal representation of the aodv routing table
-#[derive(Clone)]
-pub struct RoutingTable(Arc<Mutex<HashMap<Ipv4Addr, Route>>>);
+pub struct RoutingTable(Mutex<HashMap<Ipv4Addr, Route>>);
 
 impl RoutingTable {
     /// Instantiate the routing table
     pub fn new() -> Self {
-        RoutingTable(Arc::new(Mutex::new(HashMap::new())))
+        RoutingTable(Mutex::new(HashMap::new()))
     }
     pub fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Route>> {
         //self.0.lock().unwrap()

@@ -5,14 +5,13 @@ use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 
 use aodv::*;
-use parse::Config;
-use routing::RoutingTable;
+use super::*;
 
 const AODV_PORT: u16 = 654;
 const INSTANCE_PORT: u16 = 15292;
 
 /// Outward AODV server
-pub fn aodv(config: &Config, routing_table: RoutingTable) {
+pub fn aodv() {
 
     // Get address
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), AODV_PORT);
@@ -44,7 +43,7 @@ pub fn aodv(config: &Config, routing_table: RoutingTable) {
 }
 
 /// Internal instance server
-pub fn server(config: &Config) {
+pub fn server() {
 
     // Get address
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), INSTANCE_PORT);

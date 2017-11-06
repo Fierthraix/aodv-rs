@@ -31,7 +31,11 @@ pub fn aodv(config: &Config, routing_table: RoutingTable) {
 
     // Handle incoming AODV messages
     let stream = stream
-        .map(|(addr, msg)| { msg.handle_message(addr); })
+        .map(|(addr, msg)| {
+            msg.handle_message(&addr)
+        })
+        // Send a reply if need be
+        .filter(|ref outgoing_msg| outgoing_msg.is_some())
         .and_then(|_| Ok(()));
 
     // Start server

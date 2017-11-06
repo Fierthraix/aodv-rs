@@ -1,7 +1,7 @@
 use aodv::*;
 
 use std::io::Error;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use functions::*;
 
 /*
@@ -77,7 +77,8 @@ impl RERR {
         }
         b
     }
-    pub fn handle_message(&self){}
+    //TODO: Implement this!
+    pub fn handle_message(&self, addr: &SocketAddr)->Option<(SocketAddr, AodvMessage)>{None}
 }
 
 #[test]

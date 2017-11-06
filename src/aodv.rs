@@ -1,13 +1,13 @@
 extern crate tokio_core;
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 
 use rreq::*;
 use rrep::*;
 use rerr::*;
 
-use tokio_core::net::{UdpSocket, UdpCodec};
+use tokio_core::net::UdpCodec;
 
 /// ParseError is an io::Error specifically for when parsing an aodv message fails
 pub struct ParseError;
@@ -30,6 +30,7 @@ pub enum AodvMessage {
     Ack,
 }
 
+/// This mostly just uses pattern matching to call the appropriate method
 impl AodvMessage {
     pub fn parse(b: &[u8]) -> Result<Self, io::Error> {
         if b.len() == 0 {
@@ -54,13 +55,17 @@ impl AodvMessage {
         }
     }
 
-    pub fn handle_message(self, addr: SocketAddr) {
+    //TODO: Implement this!
+    pub fn handle_message(self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
         match self {
-            AodvMessage::Rreq(r) => r.handle_message(),
-            AodvMessage::Rrep(r) => r.handle_message(),
-            AodvMessage::Rerr(r) => r.handle_message(),
-            AodvMessage::Hello(r) => r.handle_message(),
-            AodvMessage::Ack => println!("Received Ack from {}", addr),
+            AodvMessage::Rreq(r) => r.handle_message(addr),
+            AodvMessage::Rrep(r) => r.handle_message(addr),
+            AodvMessage::Rerr(r) => r.handle_message(addr),
+            AodvMessage::Hello(r) => r.handle_message(addr),
+            AodvMessage::Ack => {
+                println!("Received Ack from {}", addr);
+                None
+            }
         }
     }
 }

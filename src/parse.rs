@@ -55,6 +55,7 @@ impl Config {
         let mut config = Config::default_config();
 
         // Change elements from a config file if supplied
+        //TODO: add a check for a config file in XDG_CONFIG_DIR
         if let Some(file) = args.value_of("config_file") {
             config.read_config(File::open(file).unwrap());
         }
@@ -64,7 +65,7 @@ impl Config {
 
         config
     }
-
+    /// Return the default config as per section 10. of the RFC
     fn default_config() -> Self {
         Config {
             current_ip: Ipv4Addr::new(0, 0, 0, 0),
@@ -97,7 +98,7 @@ impl Config {
             TTL_VALUE: 0,
         }
     }
-
+    /// Change any options read in from the given config file
     fn read_config(&mut self, file: File) {
         // Read file into string with buffered reader
         let mut buf_reader = BufReader::new(file);
@@ -115,6 +116,7 @@ impl Config {
         // TODO: Use log error reporting when something fails
 
         // Replace appropriate arguments
+        //TODO: use something more clear (like `.is_ok()`) instead of the `.map(|x|{})`
         doc["Interface"].as_str().map(|x| {
             self.interface = String::from(x)
         });
@@ -166,7 +168,7 @@ impl Config {
 
         self.compute_values();
     }
-
+    /// Change values passed in via command line flags
     fn read_args(&mut self, args: &ArgMatches) {
         args.value_of("current_ip").map(
             |x| match Ipv4Addr::from_str(x) {
@@ -179,7 +181,7 @@ impl Config {
             _ => {}
         });
     }
-
+    /// Compute config values dependent on user set ones
     fn compute_values(&mut self) {
         // Arbitrary value; see Section 10.
         let k = 5;
@@ -206,7 +208,6 @@ impl Config {
             (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as u32;
     }
 }
-
 ///  Parse the command line arguments or print help/usage information
 pub fn get_args() -> ArgMatches<'static> {
     let matches = App::new("aodv")
@@ -248,7 +249,6 @@ pub fn get_args() -> ArgMatches<'static> {
             eprintln!("incorrectly formatted ip address: {}", e);
         }
     }
-
     matches
 }
 

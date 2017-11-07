@@ -30,13 +30,14 @@ pub enum AodvMessage {
     Ack,
 }
 
-/// This mostly just uses pattern matching to call the appropriate method
+/// This mostly just uses pattern matching to call the struct method corresponding to its enum
 impl AodvMessage {
+    /// Try to convert bytes into an aodv message struct or return a ParseError
     pub fn parse(b: &[u8]) -> Result<Self, io::Error> {
         if b.len() == 0 {
             return Err(ParseError::new());
         }
-        // Type, Length, Multiple of 4
+        // Type, Length, Multiple of 4 or not
         match (b[0], b.len(), b.len() % 4) {
             (1, 24, 0) => Ok(AodvMessage::Rreq(RREQ::new(b)?)),
             (2, 20, 0) => Ok(AodvMessage::Rrep(RREP::new(b)?)),
@@ -45,6 +46,7 @@ impl AodvMessage {
             (_, _, _) => Err(ParseError::new()),
         }
     }
+    /// Convert an aodv control message into its representation as a bitfield
     pub fn bit_message(&self) -> Vec<u8> {
         match self {
             &AodvMessage::Rreq(ref r) => r.bit_message(),
@@ -55,7 +57,7 @@ impl AodvMessage {
         }
     }
 
-    //TODO: Implement this!
+    /// Handle a given aodv control message according to the protocol
     pub fn handle_message(self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
         match self {
             AodvMessage::Rreq(r) => r.handle_message(addr),

@@ -50,13 +50,13 @@ impl RoutingTable {
         };
     }
     /// Adds the route to the routing table, superseding the old one if it exists
-    pub fn put_route(&self, route: &Route) {
+    pub fn put_route(&self, route: Route) {
         // Don't add a route to yourself
         if config.current_ip == route.dest_ip {
             return;
         }
         let mut db = self.lock();
-        db.insert(route.dest_ip, route.clone());
+        db.insert(route.dest_ip, route);
     }
 }
 

@@ -21,10 +21,11 @@ mod rerr;
 mod functions;
 mod routing;
 
+#[allow(non_upper_case_globals)]
 lazy_static!{
     static ref routing_table: RoutingTable = RoutingTable::new();
     static ref rreq_database: RreqDatabase = RreqDatabase::new();
-    static ref config: Config= Config::new(&parse::get_args());
+    static ref config: Config = Config::new(&parse::get_args());
 }
 
 fn main() {

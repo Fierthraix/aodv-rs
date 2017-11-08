@@ -1,8 +1,10 @@
-use aodv::*;
-
 use std::io::Error;
 use std::net::{Ipv4Addr, SocketAddr};
+
+use aodv::*;
 use functions::*;
+use routing::Route;
+use super::*;
 
 /*
    RREQ Message Format:
@@ -59,11 +61,11 @@ impl RREQ {
             d: 1 << 4 & b[1] != 0,
             u: 1 << 3 & b[1] != 0,
             hop_count: b[3],
-            rreq_id: bytes_as_u32_be(&b[4..8]),
+            rreq_id: u32::from_be_bytes(&b[4..8]),
             dest_ip: Ipv4Addr::new(b[8], b[9], b[10], b[11]),
-            dest_seq_num: bytes_as_u32_be(&b[12..16]),
+            dest_seq_num: u32::from_be_bytes(&b[12..16]),
             orig_ip: Ipv4Addr::new(b[16], b[17], b[18], b[19]),
-            orig_seq_num: bytes_as_u32_be(&b[20..24]),
+            orig_seq_num: u32::from_be_bytes(&b[20..24]),
         })
     }
     /// Return the bit field representation of a RREQ message
@@ -79,17 +81,16 @@ impl RREQ {
 
         b.push(self.hop_count);
 
-        b.extend(u32_as_bytes_be(self.rreq_id).iter());
+        b.extend(self.rreq_id.as_be_bytes().iter());
 
         b.extend(self.dest_ip.octets().iter());
-        b.extend(u32_as_bytes_be(self.dest_seq_num).iter());
+        b.extend(self.dest_seq_num.as_be_bytes().iter());
 
         b.extend(self.orig_ip.octets().iter());
-        b.extend(u32_as_bytes_be(self.orig_seq_num).iter());
+        b.extend(self.orig_seq_num.as_be_bytes().iter());
 
         b
     }
-    //TODO: Implement this!
     pub fn handle_message(&self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
         None
     }

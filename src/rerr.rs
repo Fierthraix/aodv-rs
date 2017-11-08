@@ -47,7 +47,7 @@ impl RERR {
         let mut i = 4;
         while i < b.len(){
             udest_list.push((Ipv4Addr::new(b[i],b[i+1],b[i+2],b[i+3]),
-            bytes_as_u32_be(&b[i+4..i+8])));
+            u32::from_be_bytes(&b[i+4..i+8])));
             i+=8;
         }
 
@@ -71,7 +71,7 @@ impl RERR {
                 b.push(*bit);
             }
             // Add its sequence number
-            for bit in u32_as_bytes_be(self.udest_list[i].1).iter() {
+            for bit in self.udest_list[i].1.as_be_bytes().iter() {
                 b.push(*bit)
             }
         }

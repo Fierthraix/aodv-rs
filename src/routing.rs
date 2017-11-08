@@ -64,15 +64,15 @@ impl RoutingTable {
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Route {
-    dest_ip: Ipv4Addr,
-    dest_seq_num: u32,
-    valid_dest_seq_num: bool,
-    valid: bool,
-    interface: String,
-    hop_count: u8,
-    next_hop: Ipv4Addr,
-    precursors: Vec<Ipv4Addr>,
-    lifetime: Duration,
+    pub dest_ip: Ipv4Addr,
+    pub dest_seq_num: u32,
+    pub valid_dest_seq_num: bool,
+    pub valid: bool,
+    pub interface: String,
+    pub hop_count: u8,
+    pub next_hop: Ipv4Addr,
+    pub precursors: Vec<Ipv4Addr>,
+    pub lifetime: Duration,
     //lifetimeChannel chan bool
 }
 

@@ -1,5 +1,7 @@
 use std::io::Error;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::time::{Duration, SystemTime};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 use aodv::*;
 use functions::*;
@@ -91,7 +93,73 @@ impl RREQ {
 
         b
     }
-    pub fn handle_message(&self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+    pub fn handle_message(&mut self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+        // Create a reverse route to the sender of the RREQ
+        routing_table.set_route(Route {
+            dest_ip: addr.to_ipv4(),
+            dest_seq_num: 0,
+            valid_dest_seq_num: false,
+            valid: false,
+            interface: config.interface.clone(),
+            hop_count: 1,
+            next_hop: addr.to_ipv4(),
+            precursors: Vec::new(),
+            lifetime: Duration::from_millis(0),
+        });
+
+        // Disregard the RREQ and stop processing it if you've seen it before
+        if rreq_database.seen_before(addr.to_ipv4(), self.rreq_id) {
+            return None;
+        }
+
+        println!("Received new RREQ from {} for {}", addr, self.dest_ip);
+
+        self.hop_count += 1;
+
+        let mut db = routing_table.lock();
+
+        let minimal_lifetime = config.NET_TRAVERSAL_TIME * 2 -
+            config.NODE_TRAVERSAL_TIME * (2 * self.hop_count as u32);
+
+        //TODO Ensure inserts are in here properly
+        // Make a reverse route for the Originating IP address
+        match db.entry(self.orig_ip) {
+            Vacant(r) => {
+                // If we don't already have a route, create one based on what we know
+                r.insert(Route {
+                    dest_ip: self.orig_ip,
+                    dest_seq_num: self.dest_seq_num,
+                    valid_dest_seq_num: true,
+                    valid: true,
+                    interface: config.interface.clone(),
+                    hop_count: self.hop_count,
+                    next_hop: addr.to_ipv4(),
+                    precursors: Vec::new(),
+                    lifetime: minimal_lifetime,
+                });
+            }
+            Occupied(r) => {
+                let r = r.into_mut();
+
+                // Set the sequence number for the reverse route from the RREQ if the one in
+                // the routing table is smaller or invalid
+                if (r.valid_dest_seq_num && self.orig_seq_num > r.dest_seq_num) ||
+                    !r.valid_dest_seq_num
+                {
+                    r.dest_seq_num = self.orig_seq_num
+                }
+                // Update the route with the latest info from the RREQ
+                r.valid_dest_seq_num = true;
+                r.next_hop = addr.to_ipv4();
+                r.hop_count = self.hop_count;
+
+                if r.lifetime < minimal_lifetime {
+                    r.lifetime = minimal_lifetime;
+                }
+            }
+        };
+
+        //TODO Add logic to get decide to send RREP or not
         None
     }
 }
@@ -143,23 +211,21 @@ fn test_rreq_encoding() {
 }
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 
 // TODO: remove and use futures and timouts instead
 use std::thread;
-use std::time::Duration;
 
-#[derive(Clone)]
-pub struct RreqDatabase(Arc<Mutex<HashMap<Ipv4Addr, Vec<u32>>>>);
+pub struct RreqDatabase(Mutex<HashMap<Ipv4Addr, Vec<u32>>>);
 
 impl RreqDatabase {
     pub fn new() -> Self {
-        RreqDatabase(Arc::new(Mutex::new(HashMap::new())))
+        RreqDatabase(Mutex::new(HashMap::new()))
     }
 
     /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
     /// of it for PATH_DISCOVERY_TIME
-    pub fn seen_before(&mut self, ip: Ipv4Addr, rreq_id: u32) -> bool {
+    pub fn seen_before(&self, ip: Ipv4Addr, rreq_id: u32) -> bool {
         let mut db = self.lock();
 
         // Try to get the entry for the given ip
@@ -173,9 +239,11 @@ impl RreqDatabase {
             // If you haven't seen an ip then add it and begin it's removal timer
             } else {
                 v.push(rreq_id);
+                /*
                 // TODO: use futures or something instead of a thread
                 let _db = self.clone();
                 thread::spawn(move || { RreqDatabase::manage_rreq(ip, rreq_id, _db); });
+                */
                 false
             }
         }

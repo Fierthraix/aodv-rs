@@ -60,10 +60,10 @@ impl AodvMessage {
     /// Handle a given aodv control message according to the protocol
     pub fn handle_message(self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
         match self {
-            AodvMessage::Rreq(r) => r.handle_message(addr),
-            AodvMessage::Rrep(r) => r.handle_message(addr),
-            AodvMessage::Rerr(r) => r.handle_message(addr),
-            AodvMessage::Hello(r) => r.handle_message(addr),
+            AodvMessage::Rreq(mut r) => r.handle_message(addr),
+            AodvMessage::Rrep(mut r) => r.handle_message(addr),
+            AodvMessage::Rerr(mut r) => r.handle_message(addr),
+            AodvMessage::Hello(mut r) => r.handle_message(addr),
             AodvMessage::Ack => {
                 println!("Received Ack from {}", addr);
                 None

@@ -5,7 +5,6 @@ extern crate lazy_static;
 
 use std::thread;
 use std::env::var;
-use std::sync::Arc;
 use std::process::exit;
 
 use parse::Config;
@@ -24,8 +23,8 @@ mod routing;
 #[allow(non_upper_case_globals)]
 lazy_static!{
     static ref routing_table: RoutingTable = RoutingTable::new();
-    static ref rreq_database: RreqDatabase = RreqDatabase::new();
     static ref config: Config = Config::new(&parse::get_args());
+    static ref rreq_database: RreqDatabase = RreqDatabase::new();
 }
 
 fn main() {

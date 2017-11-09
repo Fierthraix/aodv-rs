@@ -1,3 +1,5 @@
+use super::*;
+
 //TODO: make aodv messages implement BigEndianBytes instaed of `parse` and `bit_message`
 /// Convert a type to its byte representation in Big Endian Bytes
 pub trait BigEndianBytes {
@@ -44,6 +46,16 @@ impl ToIpv4 for IpAddr {
             &IpAddr::V4(ip) => ip,
             &IpAddr::V6(_) => Ipv4Addr::new(0, 0, 0, 0),
         }
+    }
+}
+
+pub trait ToAodvSocketAddr {
+    fn to_aodv_sa(self: Self) -> SocketAddr;
+}
+
+impl ToAodvSocketAddr for Ipv4Addr {
+    fn to_aodv_sa(self: Self) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(self), AODV_PORT)
     }
 }
 

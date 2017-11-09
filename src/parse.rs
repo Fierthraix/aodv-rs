@@ -289,7 +289,6 @@ TTL_THRESHOLD: 8
 
     // Create default config
     let mut config1 = Config::default_config();
-    let config2 = Config::default_config();
 
     // Change config1 based on the `.yaml` file
     config1.read_config(File::open(&tmp).unwrap());
@@ -328,5 +327,5 @@ TTL_THRESHOLD: 8
     assert_eq!(config1, config2);
 
     // Clean up tmp file
-    remove_file(tmp);
+    remove_file(tmp).unwrap();
 }

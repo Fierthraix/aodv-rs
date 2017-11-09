@@ -1,7 +1,11 @@
-use aodv::*;
-
 use std::io::Error;
+use std::iter::Iterator;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+
+use aodv::*;
+use super::*;
 use functions::*;
 
 /*
@@ -78,7 +82,67 @@ impl RERR {
         b
     }
     //TODO: Implement this!
-    pub fn handle_message(&self, addr: &SocketAddr)->Option<(SocketAddr, AodvMessage)>{None}
+    pub fn handle_message(&mut self, addr: &SocketAddr)->Option<(SocketAddr, AodvMessage)>{
+        println!("Received RERR from {}", addr.to_ipv4());
+
+        // Get unreachable destinations that use this node as the next hop
+        let udests: Vec<(Ipv4Addr, u32)> = self.udest_list.iter().filter_map(|&(ip, seq_num)|{
+            let db = routing_table.lock();
+            // TODO: cache or something to minimize lookup?
+            for route in db.values().into_iter() {
+                if route.next_hop == ip {
+                    //TODO Find out if these clones are necessary
+                    return Some((ip.clone(), seq_num.clone()))
+                }
+            }
+            None
+        }).collect();
+
+        RERR::generate_rerr(udests)
+    }
+    fn generate_rerr(mut udests: Vec<(Ipv4Addr, u32)>) -> Option<(SocketAddr, AodvMessage)>{
+        // Sort and remove consecutive duplicates (thus removing all duplicates)
+        udests.sort();
+        udests.dedup();
+
+        // Don't forward the RERR if you don't need to
+        if udests.len() == 0 {
+            return None;
+        }
+
+
+        // Unicast if only one node needs the RERR, broadcast otherwise
+        let mut precursors: HashMap<Ipv4Addr, bool> = HashMap::new();
+
+        let mut latest_ip = Ipv4Addr::new(0,0,0,0);
+        for udest in udests.iter() {
+            let mut db = routing_table.lock();
+            match db.entry(udest.0) {
+                Occupied(r) => {
+                    for precursor in r.get().precursors.iter(){
+                        precursors.insert(precursor.clone(), true);
+                        latest_ip = precursor.clone();
+                    }
+                },
+                _ => {},
+            }
+            // If there is more than one person to send the RERR to, broadcast it!
+            if precursors.len() > 1 {
+                latest_ip = config.broadcast_address.clone();
+                break;
+            }
+        }
+        if precursors.len() == 0 {
+            // No one to send the RERR to!
+            None
+        } else {
+            Some((latest_ip.to_aodv_sa(), AodvMessage::Rerr(RERR{
+                n: false,
+                dest_count:*&udests.len().clone() as u8,
+                udest_list:udests,
+            })))
+        }
+    }
 }
 
 #[test]

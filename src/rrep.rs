@@ -1,8 +1,12 @@
-use aodv::*;
-
 use std::io::Error;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{Duration, SystemTime};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+
+use aodv::*;
+use super::*;
 use functions::*;
+use routing::Route;
 
 /*
    RREP Message Format:
@@ -21,7 +25,7 @@ use functions::*;
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    */
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RREP {
     pub r: bool, // Repair flag
     pub a: bool, // Acknowledgment required flag
@@ -78,9 +82,126 @@ impl RREP {
 
         b
     }
+    pub fn handle_message(&mut self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+        //TODO: fix this!
+        // This is likely a hello message
+        if self.dest_ip == self.orig_ip {
+            return None;
+        }
 
-    //TODO: Implement this!
-    pub fn handle_message(&self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+        println!("Received RREP from {} for {}", addr.to_ipv4(), self.orig_ip);
+
+        //TODO: if addr == config.BroadcastAddress we know this is a hello
+        //      message and should handle it appropriately
+
+        //NOTE: in this section 'destination' refers to the node that created
+        //      the RREP, and the 'originating node' is receiving the RREP
+
+        let mut db = routing_table.lock();
+
+        // If we don't already have a route, create one based on what we know
+        //TODO: this is wrong, fix it! (use `.set_route()`)
+        match db.entry(addr.to_ipv4()) {
+            Vacant(r) => {
+                //TODO: make sure all this is right
+                r.insert(Route {
+                    dest_ip: self.orig_ip,
+                    dest_seq_num: self.dest_seq_num,
+                    valid_dest_seq_num: false,
+                    valid: false,
+                    interface: config.interface.clone(),
+                    hop_count: self.hop_count,
+                    next_hop: addr.to_ipv4(),
+                    precursors: Vec::new(),
+                    lifetime: Duration::from_millis(0),
+                });
+            }
+            _ => {}
+        }
+
+        self.hop_count += 1;
+
+        let mut dest_route_changed = false;
+
+        let mut dest_route = match db.entry(self.dest_ip) {
+            Vacant(r) => {
+                dest_route_changed = true;
+                Route {
+                    dest_ip: self.orig_ip,
+                    dest_seq_num: self.dest_seq_num,
+                    valid_dest_seq_num: false,
+                    valid: false,
+                    interface: config.interface.clone(),
+                    hop_count: self.hop_count,
+                    next_hop: addr.to_ipv4(),
+                    precursors: Vec::new(),
+                    lifetime: Duration::from_millis(0),
+                }
+            }
+            Occupied(r) => r.get().clone(),
+        };
+
+        // Update the Destination Sequence Number if you need to
+        if !dest_route.valid_dest_seq_num ||
+            (dest_route.valid_dest_seq_num && self.dest_seq_num > dest_route.dest_seq_num) ||
+            (dest_route.dest_seq_num == self.dest_seq_num && !dest_route.valid) ||
+            (dest_route.dest_seq_num == self.dest_seq_num &&
+                self.hop_count < dest_route.hop_count)
+        {
+            dest_route.dest_seq_num = self.dest_seq_num;
+            dest_route_changed = true;
+        }
+
+        // If the forward route is created/modified, run this:
+        if dest_route_changed {
+            dest_route.valid = true;
+            dest_route.valid_dest_seq_num = true;
+            dest_route.next_hop = addr.to_ipv4();
+            dest_route.hop_count = self.hop_count;
+            dest_route.lifetime = Duration::from_millis(self.lifetime as u64);
+            dest_route.dest_seq_num = self.dest_seq_num;
+
+            println!("Putting changed route {}", dest_route.dest_ip);
+        }
+
+        drop(db);
+
+        routing_table.put_route(dest_route);
+
+        // If you're not the originator node, then forward the RREP and exit
+        if config.current_ip != self.orig_ip && dest_route_changed {
+            let mut db = routing_table.lock();
+
+            let orig_route = db.get(&self.orig_ip).unwrap().clone();
+            drop(db);
+
+            println!(
+                "Forwarding RREP meant for {} to {}",
+                self.orig_ip,
+                orig_route.next_hop
+            );
+
+            let mut db = routing_table.lock();
+            //TODO: fix this
+            match db.entry(self.dest_ip) {
+                Occupied(mut r) => {
+                    //TODO: fixt this!
+                    r.get_mut().precursors.push(self.dest_ip.clone());
+                }
+                _ => {}
+
+            }
+
+            //TODO: message route used
+
+
+            //TODO: generalize this!
+            return Some((
+                SocketAddr::new(IpAddr::V4(orig_route.next_hop), 654),
+                AodvMessage::Rrep(self.clone()),
+            ));
+        }
+
         None
     }
 }

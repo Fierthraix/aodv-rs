@@ -1,6 +1,6 @@
 use std::io::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 use aodv::*;
@@ -170,7 +170,7 @@ impl RREP {
 
         // If you're not the originator node, then forward the RREP and exit
         if config.current_ip != self.orig_ip && dest_route_changed {
-            let mut db = routing_table.lock();
+            let db = routing_table.lock();
 
             let orig_route = db.get(&self.orig_ip).unwrap().clone();
             drop(db);

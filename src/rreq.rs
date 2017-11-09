@@ -1,6 +1,6 @@
 use std::io::Error;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 use aodv::*;

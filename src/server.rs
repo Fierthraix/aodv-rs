@@ -6,9 +6,6 @@ use tokio_core::reactor::Core;
 
 use aodv::*;
 
-const AODV_PORT: u16 = 654;
-const INSTANCE_PORT: u16 = 15292;
-
 /// Outward AODV server
 pub fn aodv() {
 

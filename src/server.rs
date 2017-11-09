@@ -5,7 +5,6 @@ use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 
 use aodv::*;
-use super::*;
 
 const AODV_PORT: u16 = 654;
 const INSTANCE_PORT: u16 = 15292;
@@ -46,11 +45,11 @@ pub fn aodv() {
 pub fn server() {
 
     // Get address
-    let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), INSTANCE_PORT);
+    let _addr = SocketAddr::new("0.0.0.0".parse().unwrap(), INSTANCE_PORT);
 
     // Get new core/handle
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
+    let _core = Core::new().unwrap();
+    let _handle = _core.handle();
 
     //TODO: Handle messages from spun up instances
 }

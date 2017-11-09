@@ -27,6 +27,9 @@ lazy_static!{
     static ref rreq_database: RreqDatabase = RreqDatabase::new();
 }
 
+const AODV_PORT: u16 = 654;
+const INSTANCE_PORT: u16 = 15292;
+
 fn main() {
     // Get command line arguments
     let args = parse::get_args();

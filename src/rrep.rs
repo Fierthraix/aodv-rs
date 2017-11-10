@@ -101,22 +101,19 @@ impl RREP {
 
         // If we don't already have a route, create one based on what we know
         //TODO: this is wrong, fix it! (use `.set_route()`)
-        match db.entry(addr.to_ipv4()) {
-            Vacant(r) => {
-                //TODO: make sure all this is right
-                r.insert(Route {
-                    dest_ip: self.orig_ip,
-                    dest_seq_num: self.dest_seq_num,
-                    valid_dest_seq_num: false,
-                    valid: false,
-                    interface: config.interface.clone(),
-                    hop_count: self.hop_count,
-                    next_hop: addr.to_ipv4(),
-                    precursors: Vec::new(),
-                    lifetime: Duration::from_millis(0),
-                });
-            }
-            _ => {}
+        if let Vacant(r) = db.entry(addr.to_ipv4()) {
+            //TODO: make sure all this is right
+            r.insert(Route {
+                dest_ip: self.orig_ip,
+                dest_seq_num: self.dest_seq_num,
+                valid_dest_seq_num: false,
+                valid: false,
+                interface: config.interface.clone(),
+                hop_count: self.hop_count,
+                next_hop: addr.to_ipv4(),
+                precursors: Vec::new(),
+                lifetime: Duration::from_millis(0),
+            });
         }
 
         self.hop_count += 1;
@@ -158,7 +155,7 @@ impl RREP {
             dest_route.valid_dest_seq_num = true;
             dest_route.next_hop = addr.to_ipv4();
             dest_route.hop_count = self.hop_count;
-            dest_route.lifetime = Duration::from_millis(self.lifetime as u64);
+            dest_route.lifetime = Duration::from_millis(u64::from(self.lifetime));
             dest_route.dest_seq_num = self.dest_seq_num;
 
             println!("Putting changed route {}", dest_route.dest_ip);
@@ -183,13 +180,8 @@ impl RREP {
 
             let mut db = routing_table.lock();
             //TODO: fix this
-            match db.entry(self.dest_ip) {
-                Occupied(mut r) => {
-                    //TODO: fixt this!
-                    r.get_mut().precursors.push(self.dest_ip.clone());
-                }
-                _ => {}
-
+            if let Occupied(mut r) = db.entry(self.dest_ip) {
+                r.get_mut().precursors.push(self.dest_ip);
             }
 
             //TODO: message route used

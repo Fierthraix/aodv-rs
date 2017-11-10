@@ -9,7 +9,7 @@ use rerr::*;
 
 use tokio_core::net::UdpCodec;
 
-/// ParseError is an io::Error specifically for when parsing an aodv message fails
+/// `ParseError` is an `io::Error` specifically for when parsing an aodv message fails
 pub struct ParseError;
 
 impl ParseError {
@@ -34,7 +34,7 @@ pub enum AodvMessage {
 impl AodvMessage {
     /// Try to convert bytes into an aodv message struct or return a ParseError
     pub fn parse(b: &[u8]) -> Result<Self, io::Error> {
-        if b.len() == 0 {
+        if b.is_empty() {
             return Err(ParseError::new());
         }
         // Type, Length, Multiple of 4 or not
@@ -48,12 +48,12 @@ impl AodvMessage {
     }
     /// Convert an aodv control message into its representation as a bitfield
     pub fn bit_message(&self) -> Vec<u8> {
-        match self {
-            &AodvMessage::Rreq(ref r) => r.bit_message(),
-            &AodvMessage::Rrep(ref r) => r.bit_message(),
-            &AodvMessage::Rerr(ref r) => r.bit_message(),
-            &AodvMessage::Hello(ref r) => r.bit_message(),
-            &AodvMessage::Ack => vec![4, 0],
+        match *self {
+            AodvMessage::Rreq(ref r) => r.bit_message(),
+            AodvMessage::Rrep(ref r) => r.bit_message(),
+            AodvMessage::Rerr(ref r) => r.bit_message(),
+            AodvMessage::Hello(ref r) => r.bit_message(),
+            AodvMessage::Ack => vec![4, 0],
         }
     }
 
@@ -72,7 +72,7 @@ impl AodvMessage {
     }
 }
 
-/// The UdpCodec for handling aodv control message through tokio
+/// The `UdpCodec` for handling aodv control message through tokio
 pub struct AodvCodec;
 
 impl UdpCodec for AodvCodec {

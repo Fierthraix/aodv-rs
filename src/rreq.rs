@@ -119,7 +119,7 @@ impl RREQ {
         let mut db = routing_table.lock();
 
         let minimal_lifetime = config.NET_TRAVERSAL_TIME * 2 -
-            config.NODE_TRAVERSAL_TIME * (2 * self.hop_count as u32);
+            config.NODE_TRAVERSAL_TIME * (2 * u32::from(self.hop_count));
 
         //TODO Ensure inserts are in here properly
         // Make a reverse route for the Originating IP address
@@ -263,7 +263,7 @@ impl RreqDatabase {
         }
 
         // Clean up empty hash maps
-        if db.get_mut(&ip).unwrap().len() == 0 {
+        if db.get_mut(&ip).unwrap().is_empty() {
             db.remove(&ip);
         }
     }
@@ -271,7 +271,7 @@ impl RreqDatabase {
     fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {
         match self.0.lock() {
             Ok(r) => r,
-            Err(_) => panic!("Error locking rreq database!"),
+            Err(e) => panic!("error locking rreq database: {}", e),
         }
     }
 }

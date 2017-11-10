@@ -32,7 +32,7 @@ pub fn aodv() {
             msg.handle_message(&addr)
         })
     // Send a reply if need be
-    .filter(|ref outgoing_msg| outgoing_msg.is_some()) //TODO: get this using better iterator
+    .filter(|outgoing_msg| outgoing_msg.is_some()) //TODO: get this using better iterator
     // Unwrap the option (which we know is some because of the filter)
     .map(|outgoing_msg| outgoing_msg.unwrap());
 

@@ -2,7 +2,7 @@ use std::io::Error;
 use std::iter::Iterator;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::hash_map::Entry::Occupied;
 
 use aodv::*;
 use super::*;
@@ -71,11 +71,11 @@ impl RERR {
 
         for i in 0..self.udest_list.len() as usize{
             // Add each ip address
-            for bit in self.udest_list[i].0.octets().iter() {
+            for bit in &self.udest_list[i].0.octets() {
                 b.push(*bit);
             }
             // Add its sequence number
-            for bit in self.udest_list[i].1.as_be_bytes().iter() {
+            for bit in &self.udest_list[i].1.as_be_bytes() {
                 b.push(*bit)
             }
         }
@@ -89,10 +89,10 @@ impl RERR {
         let udests: Vec<(Ipv4Addr, u32)> = self.udest_list.iter().filter_map(|&(ip, seq_num)|{
             let db = routing_table.lock();
             // TODO: cache or something to minimize lookup?
-            for route in db.values().into_iter() {
+            for route in db.values() {
                 if route.next_hop == ip {
                     //TODO Find out if these clones are necessary
-                    return Some((ip.clone(), seq_num.clone()))
+                    return Some((ip, seq_num))
                 }
             }
             None
@@ -106,7 +106,7 @@ impl RERR {
         udests.dedup();
 
         // Don't forward the RERR if you don't need to
-        if udests.len() == 0 {
+        if udests.is_empty() {
             return None;
         }
 
@@ -115,31 +115,27 @@ impl RERR {
         let mut precursors: HashMap<Ipv4Addr, bool> = HashMap::new();
 
         let mut latest_ip = Ipv4Addr::new(0,0,0,0);
-        for udest in udests.iter() {
+        for udest in &udests {
             let mut db = routing_table.lock();
-            match db.entry(udest.0) {
-                Occupied(r) => {
-                    for precursor in r.get().precursors.iter(){
-                        precursors.insert(precursor.clone(), true);
-                        latest_ip = precursor.clone();
-                    }
-                },
-                _ => {},
+            if let Occupied(r) = db.entry(udest.0) {
+                for precursor in &r.get().precursors {
+                    precursors.insert(*precursor, true);
+                    latest_ip = *precursor;
+                }
             }
             // If there is more than one person to send the RERR to, broadcast it!
             if precursors.len() > 1 {
-                latest_ip = config.broadcast_address.clone();
+                latest_ip = config.broadcast_address;
                 break;
             }
         }
-        if precursors.len() == 0 {
-            // No one to send the RERR to!
-            None
+        if precursors.is_empty() {
+            None // No one to send the RERR to
         } else {
             Some((latest_ip.to_aodv_sa(), AodvMessage::Rerr(RERR{
                 n: false,
-                dest_count:*&udests.len().clone() as u8,
-                udest_list:udests,
+                dest_count: udests.len() as u8,
+                udest_list: udests,
             })))
         }
     }

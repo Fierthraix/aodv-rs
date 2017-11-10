@@ -76,7 +76,7 @@ impl Config {
             ACTIVE_ROUTE_TIMEOUT: Duration::from_millis(3000),
             ALLOWED_HELLO_LOSS: 2,
             BLACKLIST_TIMEOUT: Duration::from_millis(5000),
-            DELETE_PERIOD: Duration::from_millis(15000),
+            DELETE_PERIOD: Duration::from_millis(15_000),
             HELLO_INTERVAL: Duration::from_millis(1000),
             LOCAL_ADD_TTL: 2,
             MAX_REPAIR_TTL: 0.3 * 35.,
@@ -170,15 +170,15 @@ impl Config {
     }
     /// Change values passed in via command line flags
     fn read_args(&mut self, args: &ArgMatches) {
-        args.value_of("current_ip").map(
-            |x| match Ipv4Addr::from_str(x) {
-                Ok(ip) => self.current_ip = ip,
-                _ => {}
-            },
-        );
-        args.value_of("port").map(|x| match x.parse::<u16>() {
-            Ok(port) => self.port = port,
-            _ => {}
+        args.value_of("current_ip").map(|x| if let Ok(ip) =
+            Ipv4Addr::from_str(x)
+        {
+            self.current_ip = ip
+        });
+        args.value_of("port").map(|x| if let Ok(port) =
+            x.parse::<u16>()
+        {
+            self.port = port
         });
     }
     /// Compute config values dependent on user set ones

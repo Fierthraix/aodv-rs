@@ -28,7 +28,7 @@ lazy_static!{
 }
 
 const AODV_PORT: u16 = 654;
-const INSTANCE_PORT: u16 = 15292;
+const INSTANCE_PORT: u16 = 15_292;
 
 fn main() {
     // Get command line arguments

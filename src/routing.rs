@@ -19,13 +19,13 @@ impl RoutingTable {
         //self.0.lock().unwrap()
         match self.0.lock() {
             Ok(r) => r,
-            Err(_) => panic!("Error locking Routing Table"),
+            Err(e) => panic!("error locking routing table: {}", e),
         }
     }
     /// Adds or updates the route according to the rules in section 6.2
     //TODO: maybe change this to consume the route
     pub fn set_route(&self, route: Route) {
-        let ip = route.dest_ip.clone();
+        let ip = route.dest_ip;
         // Don't add a route to yourself
         if config.current_ip == ip {
             return;

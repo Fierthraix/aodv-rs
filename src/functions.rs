@@ -20,7 +20,7 @@ impl BigEndianBytes for u32 {
         ]
     }
     fn from_be_bytes(b: &[u8]) -> Self {
-        ((b[0] as u32) << 24) + ((b[1] as u32) << 16) + ((b[2] as u32) << 8) + ((b[3] as u32) << 0)
+        (u32::from(b[0]) << 24) + (u32::from(b[1]) << 16) + (u32::from(b[2]) << 8) + u32::from(b[3])
     }
 }
 
@@ -42,9 +42,9 @@ impl ToIpv4 for SocketAddr {
 
 impl ToIpv4 for IpAddr {
     fn to_ipv4(&self) -> Ipv4Addr {
-        match self {
-            &IpAddr::V4(ip) => ip,
-            &IpAddr::V6(_) => Ipv4Addr::new(0, 0, 0, 0),
+        match *self {
+            IpAddr::V4(ip) => ip,
+            IpAddr::V6(_) => Ipv4Addr::new(0, 0, 0, 0),
         }
     }
 }

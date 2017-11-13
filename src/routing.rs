@@ -23,7 +23,6 @@ impl RoutingTable {
         }
     }
     /// Adds or updates the route according to the rules in section 6.2
-    //TODO: maybe change this to consume the route
     pub fn set_route(&self, route: Route) {
         let ip = route.dest_ip;
         // Don't add a route to yourself

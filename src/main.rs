@@ -51,10 +51,10 @@ fn main() {
         // Start internal server
         let handle = thread::spawn(|| { server::server(); });
 
-        //go tcpServer()
-
         server::aodv();
 
         handle.join().unwrap();
+    } else {
+        println!("{}", args.usage());
     }
 }

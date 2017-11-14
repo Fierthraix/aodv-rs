@@ -47,3 +47,11 @@ pub fn server() {
 
     //TODO: Handle messages from spun up instances
 }
+
+/// Send an aodv message on a socket address
+pub fn client(s: SocketAddr, msg: AodvMessage) {
+    use std::net;
+    let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
+
+    socket.send_to(msg.bit_message().as_ref(), s).unwrap();
+}

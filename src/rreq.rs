@@ -116,14 +116,12 @@ impl RREQ {
 
         self.hop_count += 1;
 
-        let mut db = routing_table.lock();
-
         let minimal_lifetime = config.NET_TRAVERSAL_TIME * 2 -
             config.NODE_TRAVERSAL_TIME * (2 * u32::from(self.hop_count));
 
         //TODO Ensure inserts are in here properly
         // Make a reverse route for the Originating IP address
-        match db.entry(self.orig_ip) {
+        match routing_table.lock().entry(self.orig_ip) {
             Vacant(r) => {
                 // If we don't already have a route, create one based on what we know
                 r.insert(Route {
@@ -239,20 +237,19 @@ impl RreqDatabase {
             // If you haven't seen an ip then add it and begin it's removal timer
             } else {
                 v.push(rreq_id);
-                /*
                 // TODO: use futures or something instead of a thread
-                let _db = self.clone();
-                thread::spawn(move || { RreqDatabase::manage_rreq(ip, rreq_id, _db); });
-                */
+                thread::spawn(move || { RreqDatabase::manage_rreq(ip, rreq_id); });
                 false
             }
         }
     }
 
-    fn manage_rreq(ip: Ipv4Addr, rreq_id: u32, db: RreqDatabase) {
-        //TODO: Replace with lookup in config object
-        thread::sleep(Duration::from_millis(500));
-        let mut db = db.lock();
+    fn manage_rreq(ip: Ipv4Addr, rreq_id: u32) {
+
+        //TODO replace sleep with a future
+        thread::sleep(config.PATH_DISCOVERY_TIME);
+
+        let mut db = rreq_database.lock();
 
         // Scoped to remove reference to db and allow cleanup code to run
         {

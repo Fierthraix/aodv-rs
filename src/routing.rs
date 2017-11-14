@@ -29,9 +29,8 @@ impl RoutingTable {
         if config.current_ip == ip {
             return;
         }
-        let mut db = self.lock();
 
-        match db.entry(ip) {
+        match self.lock().entry(ip) {
             // Insert route if it doesn't exist
             Vacant(r) => {
                 r.insert(route);
@@ -54,8 +53,7 @@ impl RoutingTable {
         if config.current_ip == route.dest_ip {
             return;
         }
-        let mut db = self.lock();
-        db.insert(route.dest_ip, route);
+        self.lock().insert(route.dest_ip, route);
     }
 }
 
@@ -92,10 +90,7 @@ fn test_routing_table_methods() {
     routing_table.set_route(r1.clone());
 
     // Check the route was inserted properly
-    {
-        let db = routing_table.lock();
-        assert_eq!(*db.get(&r1.dest_ip).unwrap(), r1);
-    }
+    assert_eq!(*routing_table.lock().get(&r1.dest_ip).unwrap(), r1);
 
     // Re-add with invalid dest_seq_num
     let mut r2 = r1.clone();
@@ -104,10 +99,7 @@ fn test_routing_table_methods() {
     routing_table.set_route(r2.clone());
 
     // Check this route didn't supersede the old one
-    {
-        let db = routing_table.lock();
-        assert_eq!(*db.get(&r2.dest_ip).unwrap(), r2);
-    }
+    assert_eq!(*routing_table.lock().get(&r2.dest_ip).unwrap(), r2);
 
     // Add new route with unknown dest_seq_num
     let r3 = Route {
@@ -130,26 +122,17 @@ fn test_routing_table_methods() {
     routing_table.set_route(r4.clone());
 
     // Check it was overwritten properly
-    {
-        let db = routing_table.lock();
-        assert_eq!(*db.get(&r4.dest_ip).unwrap(), r4);
-    }
+    assert_eq!(*routing_table.lock().get(&r4.dest_ip).unwrap(), r4);
 
     // Check having a higher dest_seq_num overwrites
     let mut r5 = r4.clone();
     r5.dest_seq_num += 1;
     routing_table.set_route(r5.clone());
-    {
-        let db = routing_table.lock();
-        assert_eq!(*db.get(&r5.dest_ip).unwrap(), r5);
-    }
+    assert_eq!(*routing_table.lock().get(&r5.dest_ip).unwrap(), r5);
 
     // Check same dest_seq_num, but lower hop count overwrites
     let mut r6 = r5.clone();
     r6.hop_count -= 2;
     routing_table.set_route(r6.clone());
-    {
-        let db = routing_table.lock();
-        assert_eq!(*db.get(&r6.dest_ip).unwrap(), r6);
-    }
+    assert_eq!(*routing_table.lock().get(&r6.dest_ip).unwrap(), r6);
 }

@@ -24,14 +24,14 @@ pub fn aodv() {
     // Get sink/stream for AODV codec
     let (sink, stream) = socket.framed(AodvCodec).split();
 
-    //TODO: find out who server crashes on non-aodv messages
-
     // Handle incoming AODV messages
     let stream = stream
+        .filter_map(|msg| msg) // Only use properly decoded messages
         .map(|(addr, msg)| msg.handle_message(&addr))
         // Send a reply if need be
-        .filter_map(|outgoing_msg| outgoing_msg);
+        .filter_map(|msg| msg);
 
+    //let forward = stream.forward(sink);
     let _server = core.run(stream.forward(sink).and_then(|_| Ok(())));
 }
 

@@ -76,11 +76,16 @@ impl AodvMessage {
 pub struct AodvCodec;
 
 impl UdpCodec for AodvCodec {
-    type In = (SocketAddr, AodvMessage);
+    //TODO: Find out why codec user crashes when error sent up
+    type In = Option<(SocketAddr, AodvMessage)>;
     type Out = (SocketAddr, AodvMessage);
 
     fn decode(&mut self, addr: &SocketAddr, buf: &[u8]) -> Result<Self::In, io::Error> {
-        Ok((*addr, AodvMessage::parse(buf)?))
+        match AodvMessage::parse(buf) {
+            Ok(msg) => Ok(Some((*addr, msg))),
+            Err(_) => Ok(None),
+        }
+        //Ok(Some((*addr, AodvMessage::parse(buf)?)))
     }
 
     fn encode(&mut self, (addr, msg): Self::Out, into: &mut Vec<u8>) -> SocketAddr {

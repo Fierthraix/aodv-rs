@@ -55,8 +55,7 @@ impl RREP {
         Ok(RREP {
             r: 1 << 7 & b[1] != 0,
             a: 1 << 6 & b[1] != 0,
-            // TODO: Fix prefix size!
-            prefix_size: b[2],
+            prefix_size: b[2] % 32,
             hop_count: b[3],
             dest_ip: Ipv4Addr::new(b[4], b[5], b[6], b[7]),
             dest_seq_num: u32::from_be_bytes(&b[8..12]),
@@ -72,7 +71,7 @@ impl RREP {
             if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 },
         );
         // TODO: fix this value!
-        b.push(self.prefix_size);
+        b.push(self.prefix_size % 32);
         b.push(self.hop_count);
 
         b.extend(self.dest_ip.octets().iter());

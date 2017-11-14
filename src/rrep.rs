@@ -97,13 +97,9 @@ impl RREP {
         //NOTE: in this section 'destination' refers to the node that created
         //      the RREP, and the 'originating node' is receiving the RREP
 
-        let mut db = routing_table.lock();
-
-        // If we don't already have a route, create one based on what we know
-        //TODO: this is wrong, fix it! (use `.set_route()`)
-        if let Vacant(r) = db.entry(addr.to_ipv4()) {
-            //TODO: make sure all this is right
-            r.insert(Route {
+        // If we don't already have a route to the previous hop create one based on what we know
+        if !routing_table.lock().contains_key(&addr.to_ipv4()) {
+            routing_table.set_route(Route {
                 dest_ip: self.orig_ip,
                 dest_seq_num: self.dest_seq_num,
                 valid_dest_seq_num: false,
@@ -120,8 +116,8 @@ impl RREP {
 
         let mut dest_route_changed = false;
 
-        let mut dest_route = match db.entry(self.dest_ip) {
-            Vacant(r) => {
+        let mut dest_route = match routing_table.lock().entry(self.dest_ip) {
+            Vacant(_) => {
                 dest_route_changed = true;
                 Route {
                     dest_ip: self.orig_ip,
@@ -161,16 +157,11 @@ impl RREP {
             println!("Putting changed route {}", dest_route.dest_ip);
         }
 
-        drop(db);
-
         routing_table.put_route(dest_route);
 
         // If you're not the originator node, then forward the RREP and exit
         if config.current_ip != self.orig_ip && dest_route_changed {
-            let db = routing_table.lock();
-
-            let orig_route = db.get(&self.orig_ip).unwrap().clone();
-            drop(db);
+            let orig_route = routing_table.lock().get(&self.orig_ip).unwrap().clone();
 
             println!(
                 "Forwarding RREP meant for {} to {}",
@@ -178,9 +169,8 @@ impl RREP {
                 orig_route.next_hop
             );
 
-            let mut db = routing_table.lock();
             //TODO: fix this
-            if let Occupied(mut r) = db.entry(self.dest_ip) {
+            if let Occupied(mut r) = routing_table.lock().entry(self.dest_ip) {
                 r.get_mut().precursors.push(self.dest_ip);
             }
 

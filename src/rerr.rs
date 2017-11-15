@@ -87,11 +87,8 @@ impl RERR {
 
         // Get unreachable destinations that use this node as the next hop
         let udests: Vec<(Ipv4Addr, u32)> = self.udest_list.iter().filter_map(|&(ip, seq_num)|{
-            let db = routing_table.lock();
-            // TODO: cache or something to minimize lookup?
-            for route in db.values() {
+            for route in routing_table.lock().values() {
                 if route.next_hop == ip {
-                    //TODO Find out if these clones are necessary
                     return Some((ip, seq_num))
                 }
             }
@@ -116,8 +113,7 @@ impl RERR {
 
         let mut latest_ip = Ipv4Addr::new(0,0,0,0);
         for udest in &udests {
-            let mut db = routing_table.lock();
-            if let Occupied(r) = db.entry(udest.0) {
+            if let Occupied(r) = routing_table.lock().entry(udest.0) {
                 for precursor in &r.get().precursors {
                     precursors.insert(*precursor, true);
                     latest_ip = *precursor;

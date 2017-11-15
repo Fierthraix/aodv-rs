@@ -24,18 +24,14 @@ pub fn aodv() {
     // Get sink/stream for AODV codec
     let (sink, stream) = socket.framed(AodvCodec).split();
 
-    //TODO: find out who server crashes on non-aodv messages
-
     // Handle incoming AODV messages
     let stream = stream
-        .map(|(addr, msg)| {
-            msg.handle_message(&addr)
-        })
-    // Send a reply if need be
-    .filter(|outgoing_msg| outgoing_msg.is_some()) //TODO: get this using better iterator
-    // Unwrap the option (which we know is some because of the filter)
-    .map(|outgoing_msg| outgoing_msg.unwrap());
+        .filter_map(|msg| msg) // Only use properly decoded messages
+        .map(|(addr, msg)| msg.handle_message(&addr))
+        // Send a reply if need be
+        .filter_map(|msg| msg);
 
+    //let forward = stream.forward(sink);
     let _server = core.run(stream.forward(sink).and_then(|_| Ok(())));
 }
 
@@ -50,4 +46,12 @@ pub fn server() {
     let _handle = _core.handle();
 
     //TODO: Handle messages from spun up instances
+}
+
+/// Send an aodv message on a socket address
+pub fn client(s: SocketAddr, msg: AodvMessage) {
+    use std::net;
+    let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
+
+    socket.send_to(msg.bit_message().as_ref(), s).unwrap();
 }

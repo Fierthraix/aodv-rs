@@ -5,6 +5,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 use aodv::*;
 use super::*;
+use rreq::*;
 use functions::*;
 use routing::Route;
 
@@ -195,6 +196,91 @@ impl RREP {
         }
 
         None
+    }
+    pub fn generate_rrep(rreq: &RREQ) -> Option<(SocketAddr, AodvMessage)> {
+        // If you are the destination send an RREP
+        if rreq.dest_ip == config.current_ip {
+            return Some((
+                SocketAddr::new(
+                    IpAddr::V4(config.broadcast_address),
+                    AODV_PORT,
+                ),
+                AodvMessage::Rrep(RREP::create_rrep(rreq)),
+            ));
+        }
+        // If you have a valid route and sequence number to the destination
+        // send and RREP
+        if let Occupied(r) = routing_table.lock().entry(rreq.dest_ip) {
+            let r = r.get();
+            if r.valid && r.valid_dest_seq_num && r.dest_seq_num >= rreq.dest_seq_num && !rreq.d {
+                return Some((
+                    SocketAddr::new(
+                        IpAddr::V4(config.broadcast_address),
+                        AODV_PORT,
+                    ),
+                    //TODO: change this to the actual message
+                    AodvMessage::Rrep(RREP::create_rrep(rreq)),
+                ));
+            }
+        }
+        // Otherwise don't send a RREP
+        None
+    }
+
+    //TODO: Add all the proper generation logic
+    fn create_rrep(rreq: &RREQ) -> RREP {
+        let mut rrep = RREP {
+            r: false,
+            a: false,
+            prefix_size: 0,
+            hop_count: 0,
+            dest_ip: Ipv4Addr::new(0, 0, 0, 0),
+            dest_seq_num: 0,
+            orig_ip: Ipv4Addr::new(0, 0, 0, 0),
+            lifetime: 0,
+        };
+
+        //TODO: change this to be from the input
+        let mut forward_route = Route {
+            dest_ip: Ipv4Addr::new(192, 168, 10, 2),
+            dest_seq_num: 45641,
+            valid_dest_seq_num: true,
+            valid: true,
+            interface: String::from("wlan0"),
+            hop_count: 14,
+            next_hop: Ipv4Addr::new(192, 168, 10, 4),
+            precursors: Vec::new(),
+            lifetime: Duration::from_millis(0),
+        };
+
+        // If the current ip is one generating the RREP:
+        if config.current_ip == rreq.dest_ip {
+            let mut curr_seq_num = 17; // TODO: implement sequence number counting!
+            // Increment Sequence number if RREQ SeqNum is one higher
+            if rreq.dest_seq_num == curr_seq_num + 1 {
+                curr_seq_num = 17 + 1; //TODO: increment_and_get
+            }
+            // Set RREP values
+            rrep.dest_seq_num = curr_seq_num;
+            rrep.lifetime = 94; //TODO: config.MY_ROUTE_TIMEOUT;
+        } else {
+            // Set the RREP values
+            rrep.dest_seq_num = forward_route.dest_seq_num;
+            rrep.hop_count = forward_route.hop_count;
+            // Lifetime is how long until the forward route expires
+            rrep.lifetime = 37;
+
+            // Add next_hop to reverse route precursors
+            routing_table.add_precursor(rreq.dest_ip, forward_route.next_hop);
+
+            // Add node the RREQ just crome from to forward route precursors
+            forward_route.precursors.push(Ipv4Addr::new(0, 1, 2, 3)); //TODO: addr
+            forward_route.valid = true;
+
+            routing_table.put_route(forward_route);
+        }
+
+        rrep
     }
 }
 

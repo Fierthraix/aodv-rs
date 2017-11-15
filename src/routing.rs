@@ -57,6 +57,13 @@ impl RoutingTable {
         let mut db = self.lock();
         db.insert(route.dest_ip, route);
     }
+    /// Adds a precursor to the precursor list of a route
+    pub fn add_precursor(&self, route: Ipv4Addr, precursor: Ipv4Addr) {
+        if let Occupied(r) = self.lock().entry(route) {
+            let r = r.into_mut();
+            r.precursors.push(precursor); //TODO: ensure no duplicate entries
+        }
+    }
 }
 
 // TODO remove this `#allow[]`

@@ -179,7 +179,7 @@ impl RREP {
 
             //TODO: generalize this!
             return Some((
-                SocketAddr::new(IpAddr::V4(orig_route.next_hop), 654),
+                orig_route.next_hop.to_aodv_sa(),
                 AodvMessage::Rrep(self.clone()),
             ));
         }
@@ -190,10 +190,7 @@ impl RREP {
         // If you are the destination send an RREP
         if rreq.dest_ip == config.current_ip {
             return Some((
-                SocketAddr::new(
-                    IpAddr::V4(config.broadcast_address),
-                    AODV_PORT,
-                ),
+                config.broadcast_address.to_aodv_sa(),
                 AodvMessage::Rrep(RREP::create_rrep(rreq)),
             ));
         }
@@ -203,10 +200,7 @@ impl RREP {
             let r = r.get();
             if r.valid && r.valid_dest_seq_num && r.dest_seq_num >= rreq.dest_seq_num && !rreq.d {
                 return Some((
-                    SocketAddr::new(
-                        IpAddr::V4(config.broadcast_address),
-                        AODV_PORT,
-                    ),
+                    config.broadcast_address.to_aodv_sa(),
                     //TODO: change this to the actual message
                     AodvMessage::Rrep(RREP::create_rrep(rreq)),
                 ));

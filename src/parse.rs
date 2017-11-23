@@ -11,8 +11,6 @@ use std::time::Duration;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
-//TODO: add lazy static to see if that helps
-
 /// The object that holds both user-set variables and aodv constants
 #[allow(non_snake_case)]
 #[derive(Debug, PartialEq)]
@@ -47,7 +45,6 @@ pub struct Config {
     pub TTL_VALUE: usize,
 }
 
-//TODO: add tests for everything
 impl Config {
     /// Get the global config using both a .yaml file and the command line input
     pub fn new(args: &ArgMatches) -> Self {
@@ -103,20 +100,24 @@ impl Config {
         // Read file into string with buffered reader
         let mut buf_reader = BufReader::new(file);
         let mut contents = String::new();
-        // TODO handle the unwrap properly
-        buf_reader.read_to_string(&mut contents).unwrap();
+        if buf_reader.read_to_string(&mut contents).is_err() {
+            //TODO: log.Println("Unable to read config file, using default!")
+            return;
+        };
 
         // Read string file into Yaml file
-        // TODO: get rid of this unwrap
-        let yaml_file = YamlLoader::load_from_str(&contents).unwrap();
+        let yaml_file;
+        match YamlLoader::load_from_str(&contents) {
+            Ok(y) => yaml_file = y,
+            Err(_) => {
+                //TODO: log.Println("Unable to parse yaml, using default")
+                return;
+            }
+        }
         // First doc (there is multi-document support)
         let doc = &yaml_file[0];
 
-        // TODO use an iter() here or something more generic
-        // TODO: Use log error reporting when something fails
-
         // Replace appropriate arguments
-        //TODO: use something more clear (like `.is_ok()`) instead of the `.map(|x|{})`
         doc["Interface"].as_str().map(|x| {
             self.interface = String::from(x)
         });
@@ -186,7 +187,6 @@ impl Config {
         // Arbitrary value; see Section 10.
         let k = 5;
 
-        //TODO fix these unwraps
         if self.ACTIVE_ROUTE_TIMEOUT > self.HELLO_INTERVAL {
             self.DELETE_PERIOD = self.ACTIVE_ROUTE_TIMEOUT.checked_mul(k).unwrap();
         } else {

@@ -49,7 +49,7 @@ pub fn server() {
 }
 
 /// Send an aodv message on a socket address
-pub fn client(s: SocketAddr, msg: AodvMessage) {
+pub fn client(s: SocketAddr, msg: &AodvMessage) {
     use std::net;
     let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
 

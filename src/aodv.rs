@@ -37,34 +37,37 @@ impl AodvMessage {
         if b.is_empty() {
             return Err(ParseError::new());
         }
+        use self::AodvMessage::*;
         // Type, Length, Multiple of 4 or not
         match (b[0], b.len(), b.len() % 4) {
-            (1, 24, 0) => Ok(AodvMessage::Rreq(RREQ::new(b)?)),
-            (2, 20, 0) => Ok(AodvMessage::Rrep(RREP::new(b)?)),
-            (3, _, 0) => Ok(AodvMessage::Rerr(RERR::new(b)?)),
-            (4, 2, 2) => Ok(AodvMessage::Ack),
+            (1, 24, 0) => Ok(Rreq(RREQ::new(b)?)),
+            (2, 20, 0) => Ok(Rrep(RREP::new(b)?)),
+            (3, _, 0) => Ok(Rerr(RERR::new(b)?)),
+            (4, 2, 2) => Ok(Ack),
             (_, _, _) => Err(ParseError::new()),
         }
     }
     /// Convert an aodv control message into its representation as a bitfield
     pub fn bit_message(&self) -> Vec<u8> {
+        use self::AodvMessage::*;
         match *self {
-            AodvMessage::Rreq(ref r) => r.bit_message(),
-            AodvMessage::Rrep(ref r) => r.bit_message(),
-            AodvMessage::Rerr(ref r) => r.bit_message(),
-            AodvMessage::Hello(ref r) => r.bit_message(),
-            AodvMessage::Ack => vec![4, 0],
+            Rreq(ref r) => r.bit_message(),
+            Rrep(ref r) => r.bit_message(),
+            Rerr(ref r) => r.bit_message(),
+            Hello(ref r) => r.bit_message(),
+            Ack => vec![4, 0],
         }
     }
 
     /// Handle a given aodv control message according to the protocol
     pub fn handle_message(self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+        use self::AodvMessage::*;
         match self {
-            AodvMessage::Rreq(mut r) => r.handle_message(addr),
-            AodvMessage::Rrep(mut r) => r.handle_message(addr),
-            AodvMessage::Rerr(mut r) => r.handle_message(addr),
-            AodvMessage::Hello(mut r) => r.handle_message(addr),
-            AodvMessage::Ack => {
+            Rreq(mut r) => r.handle_message(addr),
+            Rrep(mut r) => r.handle_message(addr),
+            Rerr(mut r) => r.handle_message(addr),
+            Hello(mut r) => r.handle_message(addr),
+            Ack => {
                 println!("Received Ack from {}", addr);
                 None
             }

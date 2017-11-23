@@ -1,7 +1,7 @@
 use std::io::Error;
 use std::iter::Iterator;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::Entry::Occupied;
 
 use aodv::*;
@@ -109,13 +109,13 @@ impl RERR {
 
 
         // Unicast if only one node needs the RERR, broadcast otherwise
-        let mut precursors: HashMap<Ipv4Addr, bool> = HashMap::new();
+        let mut precursors: HashSet<Ipv4Addr> = HashSet::new();
 
         let mut latest_ip = Ipv4Addr::new(0,0,0,0);
         for udest in &udests {
             if let Occupied(r) = routing_table.lock().entry(udest.0) {
                 for precursor in &r.get().precursors {
-                    precursors.insert(*precursor, true);
+                    precursors.insert(*precursor);
                     latest_ip = *precursor;
                 }
             }

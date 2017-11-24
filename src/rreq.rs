@@ -93,7 +93,7 @@ impl RREQ {
 
         b
     }
-    pub fn handle_message(&mut self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+    pub fn handle_message(&mut self, addr: &SocketAddr) {
         // Create a reverse route to the sender of the RREQ
         routing_table.set_route(Route {
             dest_ip: addr.to_ipv4(),
@@ -109,7 +109,7 @@ impl RREQ {
 
         // Disregard the RREQ and stop processing it if you've seen it before
         if rreq_database.seen_before(addr.to_ipv4(), self.rreq_id) {
-            return None;
+            return;
         }
 
         println!("Received new RREQ from {} for {}", addr, self.dest_ip);
@@ -158,7 +158,6 @@ impl RREQ {
         };
 
         //TODO Add logic to get decide to send RREP or not
-        None
     }
 }
 

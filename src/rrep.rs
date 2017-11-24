@@ -6,6 +6,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use aodv::*;
 use super::*;
 use rreq::*;
+use server::client;
 use functions::*;
 use routing::Route;
 
@@ -82,11 +83,11 @@ impl RREP {
 
         b
     }
-    pub fn handle_message(&mut self, addr: &SocketAddr) -> Option<(SocketAddr, AodvMessage)> {
+    pub fn handle_message(&mut self, addr: &SocketAddr) {
         //TODO: fix this!
         // This is likely a hello message
         if self.dest_ip == self.orig_ip {
-            return None;
+            return;
         }
 
         println!("Received RREP from {} for {}", addr.to_ipv4(), self.orig_ip);
@@ -178,13 +179,11 @@ impl RREP {
 
 
             //TODO: generalize this!
-            return Some((
+            client(
                 orig_route.next_hop.to_aodv_sa(),
-                AodvMessage::Rrep(self.clone()),
-            ));
+                &AodvMessage::Rrep(self.clone()),
+            );
         }
-
-        None
     }
     pub fn generate_rrep(rreq: &RREQ) -> Option<(SocketAddr, AodvMessage)> {
         // If you are the destination send an RREP

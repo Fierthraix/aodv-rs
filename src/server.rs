@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use futures::{Future, Stream};
+use futures::{future, Future, Stream};
 use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 
@@ -22,17 +22,15 @@ pub fn aodv() {
     println!("Started listening on {}", AODV_PORT);
 
     // Get sink/stream for AODV codec
-    let (sink, stream) = socket.framed(AodvCodec).split();
+    let (_, stream) = socket.framed(AodvCodec).split();
 
     // Handle incoming AODV messages
-    let stream = stream
-        .filter_map(|msg| msg) // Only use properly decoded messages
-        .map(|(addr, msg)| msg.handle_message(&addr))
-        // Send a reply if need be
-        .filter_map(|msg| msg);
+    let stream = stream.filter_map(|msg| msg).for_each(|(addr, msg)| {
+        msg.handle_message(&addr);
+        future::ok(())
+    });
 
-    //let forward = stream.forward(sink);
-    let _server = core.run(stream.forward(sink).and_then(|_| Ok(())));
+    let _server = core.run(stream);
 }
 
 /// Internal instance server

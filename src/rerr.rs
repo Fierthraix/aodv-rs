@@ -7,6 +7,7 @@ use std::collections::hash_map::Entry::Occupied;
 use aodv::*;
 use super::*;
 use functions::*;
+use server::client;
 
 /*
    RERR Message Format:
@@ -82,7 +83,7 @@ impl RERR {
         b
     }
     //TODO: Implement this!
-    pub fn handle_message(&mut self, addr: &SocketAddr)->Option<(SocketAddr, AodvMessage)>{
+    pub fn handle_message(&mut self, addr: &SocketAddr){
         println!("Received RERR from {}", addr.to_ipv4());
 
         // Get unreachable destinations that use this node as the next hop
@@ -95,7 +96,10 @@ impl RERR {
             None
         }).collect();
 
-        RERR::generate_rerr(udests)
+        // Send an RERR if you need to
+        if let Some((addr, rerr))=  RERR::generate_rerr(udests) {
+            client(addr, &rerr);
+        }
     }
     fn generate_rerr(mut udests: Vec<(Ipv4Addr, u32)>) -> Option<(SocketAddr, AodvMessage)>{
         // Sort and remove consecutive duplicates (thus removing all duplicates)

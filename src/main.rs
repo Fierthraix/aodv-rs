@@ -9,14 +9,11 @@ use std::process::exit;
 
 use parse::Config;
 use routing::RoutingTable;
-use rreq::RreqDatabase;
+use aodv::RreqDatabase;
 
 mod aodv;
 mod parse;
 mod server;
-mod rreq;
-mod rrep;
-mod rerr;
 mod functions;
 mod routing;
 

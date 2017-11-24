@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use futures::{future, Future, Stream};
+use futures::{future, Stream};
 use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 

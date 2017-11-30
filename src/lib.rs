@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate lazy_static;
 extern crate tokio_core;
 extern crate futures;
 
@@ -8,8 +10,6 @@ use std::time::Duration;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-#[macro_use]
-extern crate lazy_static;
 
 pub mod functions;
 pub mod routing;
@@ -20,9 +20,7 @@ use functions::*;
 use routing::{Route, RoutingTable};
 use server::client;
 use parse::Config;
-//use super::*;
 
-#[allow(non_upper_case_globals)]
 lazy_static!{
     static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
     static ref CONFIG: Config = Config::new(&parse::get_args());

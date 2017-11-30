@@ -4,8 +4,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use std::net::Ipv4Addr;
 
-use super::*;
-
 /// The internal representation of the aodv routing table
 pub struct RoutingTable(Mutex<HashMap<Ipv4Addr, Route>>);
 
@@ -25,10 +23,6 @@ impl RoutingTable {
     /// Adds or updates the route according to the rules in section 6.2
     pub fn set_route(&self, route: Route) {
         let ip = route.dest_ip;
-        // Don't add a route to yourself
-        if config.current_ip == ip {
-            return;
-        }
 
         match self.lock().entry(ip) {
             // Insert route if it doesn't exist
@@ -49,10 +43,6 @@ impl RoutingTable {
     }
     /// Adds the route to the routing table, superseding the old one if it exists
     pub fn put_route(&self, route: Route) {
-        // Don't add a route to yourself
-        if config.current_ip == route.dest_ip {
-            return;
-        }
         self.lock().insert(route.dest_ip, route);
     }
     /// Adds a precursor to the precursor list of a route
@@ -82,6 +72,8 @@ pub struct Route {
 
 #[test]
 fn test_routing_table_methods() {
+    let routing_table: RoutingTable = RoutingTable::new();
+
     let r1 = Route {
         dest_ip: Ipv4Addr::new(192, 168, 10, 2),
         dest_seq_num: 45641,

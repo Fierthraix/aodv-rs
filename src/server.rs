@@ -4,7 +4,6 @@ use futures::{future, Stream};
 use tokio_core::net::UdpSocket;
 use tokio_core::reactor::Core;
 
-use aodv::*;
 use super::*;
 
 /// Outward AODV server

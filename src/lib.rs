@@ -1,4 +1,5 @@
 extern crate tokio_core;
+extern crate futures;
 
 use std::io;
 use std::io::Error;
@@ -7,11 +8,29 @@ use std::time::Duration;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-use functions::*;
-use routing::Route;
-use server::client;
-use super::*;
+#[macro_use]
+extern crate lazy_static;
 
+pub mod functions;
+pub mod routing;
+pub mod server;
+pub mod parse;
+
+use functions::*;
+use routing::{Route, RoutingTable};
+use server::client;
+use parse::Config;
+//use super::*;
+
+#[allow(non_upper_case_globals)]
+lazy_static!{
+    static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
+    static ref CONFIG: Config = Config::new(&parse::get_args());
+    static ref RREQ_DATABASE: RreqDatabase = RreqDatabase::new();
+}
+
+pub const AODV_PORT: u16 = 654;
+pub const INSTANCE_PORT: u16 = 15_292;
 
 use tokio_core::net::UdpCodec;
 
@@ -186,12 +205,12 @@ impl RREQ {
     }
     pub fn handle_message(&mut self, addr: &SocketAddr) {
         // Create a reverse route to the sender of the RREQ
-        routing_table.set_route(Route {
+        ROUTING_TABLE.set_route(Route {
             dest_ip: addr.to_ipv4(),
             dest_seq_num: 0,
             valid_dest_seq_num: false,
             valid: false,
-            interface: config.interface.clone(),
+            interface: CONFIG.interface.clone(),
             hop_count: 1,
             next_hop: addr.to_ipv4(),
             precursors: Vec::new(),
@@ -199,7 +218,7 @@ impl RREQ {
         });
 
         // Disregard the RREQ and stop processing it if you've seen it before
-        if rreq_database.seen_before(addr.to_ipv4(), self.rreq_id) {
+        if RREQ_DATABASE.seen_before(addr.to_ipv4(), self.rreq_id) {
             return;
         }
 
@@ -207,12 +226,12 @@ impl RREQ {
 
         self.hop_count += 1;
 
-        let minimal_lifetime = config.NET_TRAVERSAL_TIME * 2 -
-            config.NODE_TRAVERSAL_TIME * (2 * u32::from(self.hop_count));
+        let minimal_lifetime = CONFIG.NET_TRAVERSAL_TIME * 2 -
+            CONFIG.NODE_TRAVERSAL_TIME * (2 * u32::from(self.hop_count));
 
         //TODO Ensure inserts are in here properly
         // Make a reverse route for the Originating IP address
-        match routing_table.lock().entry(self.orig_ip) {
+        match ROUTING_TABLE.lock().entry(self.orig_ip) {
             Vacant(r) => {
                 // If we don't already have a route, create one based on what we know
                 r.insert(Route {
@@ -220,7 +239,7 @@ impl RREQ {
                     dest_seq_num: self.dest_seq_num,
                     valid_dest_seq_num: true,
                     valid: true,
-                    interface: config.interface.clone(),
+                    interface: CONFIG.interface.clone(),
                     hop_count: self.hop_count,
                     next_hop: addr.to_ipv4(),
                     precursors: Vec::new(),
@@ -331,20 +350,20 @@ impl RREP {
 
         println!("Received RREP from {} for {}", addr.to_ipv4(), self.orig_ip);
 
-        //TODO: if addr == config.BroadcastAddress we know this is a hello
+        //TODO: if addr == CONFIG.BroadcastAddress we know this is a hello
         //      message and should handle it appropriately
 
         //NOTE: in this section 'destination' refers to the node that created
         //      the RREP, and the 'originating node' is receiving the RREP
 
         // If we don't already have a route to the previous hop create one based on what we know
-        if !routing_table.lock().contains_key(&addr.to_ipv4()) {
-            routing_table.set_route(Route {
+        if !ROUTING_TABLE.lock().contains_key(&addr.to_ipv4()) {
+            ROUTING_TABLE.set_route(Route {
                 dest_ip: self.orig_ip,
                 dest_seq_num: self.dest_seq_num,
                 valid_dest_seq_num: false,
                 valid: false,
-                interface: config.interface.clone(),
+                interface: CONFIG.interface.clone(),
                 hop_count: self.hop_count,
                 next_hop: addr.to_ipv4(),
                 precursors: Vec::new(),
@@ -356,7 +375,7 @@ impl RREP {
 
         let mut dest_route_changed = false;
 
-        let mut dest_route = match routing_table.lock().entry(self.dest_ip) {
+        let mut dest_route = match ROUTING_TABLE.lock().entry(self.dest_ip) {
             Vacant(_) => {
                 dest_route_changed = true;
                 Route {
@@ -364,7 +383,7 @@ impl RREP {
                     dest_seq_num: self.dest_seq_num,
                     valid_dest_seq_num: false,
                     valid: false,
-                    interface: config.interface.clone(),
+                    interface: CONFIG.interface.clone(),
                     hop_count: self.hop_count,
                     next_hop: addr.to_ipv4(),
                     precursors: Vec::new(),
@@ -397,11 +416,11 @@ impl RREP {
             println!("Putting changed route {}", dest_route.dest_ip);
         }
 
-        routing_table.put_route(dest_route);
+        ROUTING_TABLE.put_route(dest_route);
 
         // If you're not the originator node, then forward the RREP and exit
-        if config.current_ip != self.orig_ip && dest_route_changed {
-            let orig_route = routing_table.lock().get(&self.orig_ip).unwrap().clone();
+        if CONFIG.current_ip != self.orig_ip && dest_route_changed {
+            let orig_route = ROUTING_TABLE.lock().get(&self.orig_ip).unwrap().clone();
 
             println!(
                 "Forwarding RREP meant for {} to {}",
@@ -410,7 +429,7 @@ impl RREP {
                 );
 
             //TODO: fix this
-            if let Occupied(mut r) = routing_table.lock().entry(self.dest_ip) {
+            if let Occupied(mut r) = ROUTING_TABLE.lock().entry(self.dest_ip) {
                 r.get_mut().precursors.push(self.dest_ip);
             }
 
@@ -426,19 +445,19 @@ impl RREP {
     }
     pub fn generate_rrep(rreq: &RREQ) -> Option<(SocketAddr, AodvMessage)> {
         // If you are the destination send an RREP
-        if rreq.dest_ip == config.current_ip {
+        if rreq.dest_ip == CONFIG.current_ip {
             return Some((
-                    config.broadcast_address.to_aodv_sa(),
+                    CONFIG.broadcast_address.to_aodv_sa(),
                     AodvMessage::Rrep(RREP::create_rrep(rreq)),
                     ));
         }
         // If you have a valid route and sequence number to the destination
         // send and RREP
-        if let Occupied(r) = routing_table.lock().entry(rreq.dest_ip) {
+        if let Occupied(r) = ROUTING_TABLE.lock().entry(rreq.dest_ip) {
             let r = r.get();
             if r.valid && r.valid_dest_seq_num && r.dest_seq_num >= rreq.dest_seq_num && !rreq.d {
                 return Some((
-                        config.broadcast_address.to_aodv_sa(),
+                        CONFIG.broadcast_address.to_aodv_sa(),
                         //TODO: change this to the actual message
                         AodvMessage::Rrep(RREP::create_rrep(rreq)),
                         ));
@@ -475,7 +494,7 @@ impl RREP {
         };
 
         // If the current ip is one generating the RREP:
-        if config.current_ip == rreq.dest_ip {
+        if CONFIG.current_ip == rreq.dest_ip {
             let mut curr_seq_num = 17; // TODO: implement sequence number counting!
             // Increment Sequence number if RREQ SeqNum is one higher
             if rreq.dest_seq_num == curr_seq_num + 1 {
@@ -483,7 +502,7 @@ impl RREP {
             }
             // Set RREP values
             rrep.dest_seq_num = curr_seq_num;
-            rrep.lifetime = 94; //TODO: config.MY_ROUTE_TIMEOUT;
+            rrep.lifetime = 94; //TODO: CONFIG.MY_ROUTE_TIMEOUT;
         } else {
             // Set the RREP values
             rrep.dest_seq_num = forward_route.dest_seq_num;
@@ -492,13 +511,13 @@ impl RREP {
             rrep.lifetime = 37;
 
             // Add next_hop to reverse route precursors
-            routing_table.add_precursor(rreq.dest_ip, forward_route.next_hop);
+            ROUTING_TABLE.add_precursor(rreq.dest_ip, forward_route.next_hop);
 
             // Add node the RREQ just crome from to forward route precursors
             forward_route.precursors.push(Ipv4Addr::new(0, 1, 2, 3)); //TODO: addr
             forward_route.valid = true;
 
-            routing_table.put_route(forward_route);
+            ROUTING_TABLE.put_route(forward_route);
         }
 
         rrep
@@ -582,7 +601,7 @@ impl RERR {
 
         // Get unreachable destinations that use this node as the next hop
         let udests: Vec<(Ipv4Addr, u32)> = self.udest_list.iter().filter_map(|&(ip, seq_num)|{
-            for route in routing_table.lock().values() {
+            for route in ROUTING_TABLE.lock().values() {
                 if route.next_hop == ip {
                     return Some((ip, seq_num))
                 }
@@ -611,7 +630,7 @@ impl RERR {
 
         let mut latest_ip = Ipv4Addr::new(0,0,0,0);
         for udest in &udests {
-            if let Occupied(r) = routing_table.lock().entry(udest.0) {
+            if let Occupied(r) = ROUTING_TABLE.lock().entry(udest.0) {
                 for precursor in &r.get().precursors {
                     precursors.insert(*precursor);
                     latest_ip = *precursor;
@@ -619,7 +638,7 @@ impl RERR {
             }
             // If there is more than one person to send the RERR to, broadcast it!
             if precursors.len() > 1 {
-                latest_ip = config.broadcast_address;
+                latest_ip = CONFIG.broadcast_address;
                 break;
             }
         }
@@ -673,9 +692,9 @@ impl RreqDatabase {
     fn manage_rreq(ip: Ipv4Addr, rreq_id: u32) {
 
         //TODO replace sleep with a future
-        thread::sleep(config.PATH_DISCOVERY_TIME);
+        thread::sleep(CONFIG.PATH_DISCOVERY_TIME);
 
-        let mut db = rreq_database.lock();
+        let mut db = RREQ_DATABASE.lock();
 
         // Scoped to remove reference to db and allow cleanup code to run
         {

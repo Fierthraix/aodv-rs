@@ -1,31 +1,14 @@
 extern crate futures;
 extern crate tokio_core;
-#[macro_use]
-extern crate lazy_static;
+
+extern crate aodv;
 
 use std::thread;
 use std::env::var;
 use std::process::exit;
 
-use parse::Config;
-use routing::RoutingTable;
-use aodv::RreqDatabase;
+use aodv::{parse, server};
 
-mod aodv;
-mod parse;
-mod server;
-mod functions;
-mod routing;
-
-#[allow(non_upper_case_globals)]
-lazy_static!{
-    static ref routing_table: RoutingTable = RoutingTable::new();
-    static ref config: Config = Config::new(&parse::get_args());
-    static ref rreq_database: RreqDatabase = RreqDatabase::new();
-}
-
-const AODV_PORT: u16 = 654;
-const INSTANCE_PORT: u16 = 15_292;
 
 fn main() {
     // Get command line arguments

@@ -70,68 +70,77 @@ pub struct Route {
     //lifetimeChannel chan bool
 }
 
-#[test]
-fn test_routing_table_methods() {
-    let routing_table: RoutingTable = RoutingTable::new();
+#[cfg(test)]
+mod test_routing_table {
 
-    let r1 = Route {
-        dest_ip: Ipv4Addr::new(192, 168, 10, 2),
-        dest_seq_num: 45641,
-        valid_dest_seq_num: true,
-        valid: true,
-        interface: String::from("wlan0"),
-        hop_count: 14,
-        next_hop: Ipv4Addr::new(192, 168, 10, 4),
-        precursors: Vec::new(),
-        lifetime: Duration::from_millis(0),
-    };
+    use super::*;
 
-    routing_table.set_route(r1.clone());
+    lazy_static!{
+        static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
+    }
 
-    // Check the route was inserted properly
-    assert_eq!(*routing_table.lock().get(&r1.dest_ip).unwrap(), r1);
+    #[test]
+    fn test_routing_table_methods() {
 
-    // Re-add with invalid dest_seq_num
-    let mut r2 = r1.clone();
-    r2.valid_dest_seq_num = false;
-    r2.dest_seq_num = 0;
-    routing_table.set_route(r2.clone());
+        let r1 = Route {
+            dest_ip: Ipv4Addr::new(192, 168, 10, 2),
+            dest_seq_num: 45641,
+            valid_dest_seq_num: true,
+            valid: true,
+            interface: String::from("wlan0"),
+            hop_count: 14,
+            next_hop: Ipv4Addr::new(192, 168, 10, 4),
+            precursors: Vec::new(),
+            lifetime: Duration::from_millis(0),
+        };
 
-    // Check this route didn't supersede the old one
-    assert_eq!(*routing_table.lock().get(&r2.dest_ip).unwrap(), r2);
+        ROUTING_TABLE.set_route(r1.clone());
 
-    // Add new route with unknown dest_seq_num
-    let r3 = Route {
-        dest_ip: Ipv4Addr::new(192, 168, 10, 3),
-        dest_seq_num: 0,
-        valid_dest_seq_num: false,
-        valid: true,
-        interface: String::from("wlan0"),
-        hop_count: 14,
-        next_hop: Ipv4Addr::new(192, 168, 10, 4),
-        precursors: Vec::new(),
-        lifetime: Duration::from_millis(0),
-    };
-    routing_table.set_route(r3.clone());
+        // Check the route was inserted properly
+        assert_eq!(*ROUTING_TABLE.lock().get(&r1.dest_ip).unwrap(), r1);
 
-    // Overwrite it with a valid dest_seq_num
-    let mut r4 = r3.clone();
-    r4.dest_seq_num = 46;
-    r4.valid_dest_seq_num = true;
-    routing_table.set_route(r4.clone());
+        // Re-add with invalid dest_seq_num
+        let mut r2 = r1.clone();
+        r2.valid_dest_seq_num = false;
+        r2.dest_seq_num = 0;
+        ROUTING_TABLE.set_route(r2.clone());
 
-    // Check it was overwritten properly
-    assert_eq!(*routing_table.lock().get(&r4.dest_ip).unwrap(), r4);
+        // Check this route didn't supersede the old one
+        assert_eq!(*ROUTING_TABLE.lock().get(&r2.dest_ip).unwrap(), r2);
 
-    // Check having a higher dest_seq_num overwrites
-    let mut r5 = r4.clone();
-    r5.dest_seq_num += 1;
-    routing_table.set_route(r5.clone());
-    assert_eq!(*routing_table.lock().get(&r5.dest_ip).unwrap(), r5);
+        // Add new route with unknown dest_seq_num
+        let r3 = Route {
+            dest_ip: Ipv4Addr::new(192, 168, 10, 3),
+            dest_seq_num: 0,
+            valid_dest_seq_num: false,
+            valid: true,
+            interface: String::from("wlan0"),
+            hop_count: 14,
+            next_hop: Ipv4Addr::new(192, 168, 10, 4),
+            precursors: Vec::new(),
+            lifetime: Duration::from_millis(0),
+        };
+        ROUTING_TABLE.set_route(r3.clone());
 
-    // Check same dest_seq_num, but lower hop count overwrites
-    let mut r6 = r5.clone();
-    r6.hop_count -= 2;
-    routing_table.set_route(r6.clone());
-    assert_eq!(*routing_table.lock().get(&r6.dest_ip).unwrap(), r6);
+        // Overwrite it with a valid dest_seq_num
+        let mut r4 = r3.clone();
+        r4.dest_seq_num = 46;
+        r4.valid_dest_seq_num = true;
+        ROUTING_TABLE.set_route(r4.clone());
+
+        // Check it was overwritten properly
+        assert_eq!(*ROUTING_TABLE.lock().get(&r4.dest_ip).unwrap(), r4);
+
+        // Check having a higher dest_seq_num overwrites
+        let mut r5 = r4.clone();
+        r5.dest_seq_num += 1;
+        ROUTING_TABLE.set_route(r5.clone());
+        assert_eq!(*ROUTING_TABLE.lock().get(&r5.dest_ip).unwrap(), r5);
+
+        // Check same dest_seq_num, but lower hop count overwrites
+        let mut r6 = r5.clone();
+        r6.hop_count -= 2;
+        ROUTING_TABLE.set_route(r6.clone());
+        assert_eq!(*ROUTING_TABLE.lock().get(&r6.dest_ip).unwrap(), r6);
+    }
 }

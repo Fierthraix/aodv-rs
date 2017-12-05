@@ -49,7 +49,7 @@ impl Config {
     /// Get the global config using both a .yaml file and the command line input
     pub fn new(args: &ArgMatches) -> Self {
         // Load the default config
-        let mut config = Config::default_config();
+        let mut config = Config::default();
 
         // Change elements from a config file if supplied
         //TODO: add a check for a config file in XDG_CONFIG_DIR
@@ -61,39 +61,6 @@ impl Config {
         config.read_args(args);
 
         config
-    }
-    /// Return the default config as per section 10. of the RFC
-    fn default_config() -> Self {
-        Config {
-            current_ip: Ipv4Addr::new(0, 0, 0, 0),
-            interface: "wlano".parse().unwrap(),
-            broadcast_address: Ipv4Addr::new(255, 255, 255, 255),
-            port: 1200,
-
-            ACTIVE_ROUTE_TIMEOUT: Duration::from_millis(3000),
-            ALLOWED_HELLO_LOSS: 2,
-            BLACKLIST_TIMEOUT: Duration::from_millis(5000),
-            DELETE_PERIOD: Duration::from_millis(15_000),
-            HELLO_INTERVAL: Duration::from_millis(1000),
-            LOCAL_ADD_TTL: 2,
-            MAX_REPAIR_TTL: 0.3 * 35.,
-            MIN_REPAIR_TTL: 0,
-            MY_ROUTE_TIMEOUT: Duration::from_millis(6000),
-            NET_DIAMETER: 35,
-            NET_TRAVERSAL_TIME: Duration::from_millis(2800),
-            NEXT_HOP_WAIT: Duration::from_millis(50),
-            NODE_TRAVERSAL_TIME: Duration::from_millis(40),
-            PATH_DISCOVERY_TIME: Duration::from_millis(5600),
-            RERR_RATELIMIT: 10,
-            RING_TRAVERSAL_TIME: Duration::from_millis(160),
-            RREQ_RETRIES: 2,
-            RREQ_RATELIMIT: 10,
-            TIMEOUT_BUFFER: 2,
-            TTL_START: 1,
-            TTL_INCREMENT: 2,
-            TTL_THRESHOLD: 7,
-            TTL_VALUE: 0,
-        }
     }
     /// Change any options read in from the given config file
     fn read_config(&mut self, file: File) {
@@ -208,6 +175,42 @@ impl Config {
             (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as u32;
     }
 }
+impl Default for Config {
+    /// Return the default config as per section 10. of the RFC
+    fn default() -> Self {
+        Config {
+            current_ip: Ipv4Addr::new(0, 0, 0, 0),
+            interface: "wlano".parse().unwrap(),
+            broadcast_address: Ipv4Addr::new(255, 255, 255, 255),
+            port: 1200,
+
+            ACTIVE_ROUTE_TIMEOUT: Duration::from_millis(3000),
+            ALLOWED_HELLO_LOSS: 2,
+            BLACKLIST_TIMEOUT: Duration::from_millis(5000),
+            DELETE_PERIOD: Duration::from_millis(15_000),
+            HELLO_INTERVAL: Duration::from_millis(1000),
+            LOCAL_ADD_TTL: 2,
+            MAX_REPAIR_TTL: 0.3 * 35.,
+            MIN_REPAIR_TTL: 0,
+            MY_ROUTE_TIMEOUT: Duration::from_millis(6000),
+            NET_DIAMETER: 35,
+            NET_TRAVERSAL_TIME: Duration::from_millis(2800),
+            NEXT_HOP_WAIT: Duration::from_millis(50),
+            NODE_TRAVERSAL_TIME: Duration::from_millis(40),
+            PATH_DISCOVERY_TIME: Duration::from_millis(5600),
+            RERR_RATELIMIT: 10,
+            RING_TRAVERSAL_TIME: Duration::from_millis(160),
+            RREQ_RETRIES: 2,
+            RREQ_RATELIMIT: 10,
+            TIMEOUT_BUFFER: 2,
+            TTL_START: 1,
+            TTL_INCREMENT: 2,
+            TTL_THRESHOLD: 7,
+            TTL_VALUE: 0,
+        }
+    }
+}
+
 ///  Parse the command line arguments or print help/usage information
 pub fn get_args() -> ArgMatches<'static> {
     let matches = App::new("aodv")

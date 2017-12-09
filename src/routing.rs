@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -49,7 +49,7 @@ impl RoutingTable {
     pub fn add_precursor(&self, route: Ipv4Addr, precursor: Ipv4Addr) {
         if let Occupied(r) = self.lock().entry(route) {
             let r = r.into_mut();
-            r.precursors.push(precursor); //TODO: ensure no duplicate entries
+            r.precursors.insert(precursor);
         }
     }
 }
@@ -65,7 +65,7 @@ pub struct Route {
     pub interface: String,
     pub hop_count: u8,
     pub next_hop: Ipv4Addr,
-    pub precursors: Vec<Ipv4Addr>,
+    pub precursors: HashSet<Ipv4Addr>,
     pub lifetime: Duration,
     //lifetimeChannel chan bool
 }
@@ -90,7 +90,7 @@ mod test_routing_table {
             interface: String::from("wlan0"),
             hop_count: 14,
             next_hop: Ipv4Addr::new(192, 168, 10, 4),
-            precursors: Vec::new(),
+            precursors: HashSet::new(),
             lifetime: Duration::from_millis(0),
         };
 
@@ -117,7 +117,7 @@ mod test_routing_table {
             interface: String::from("wlan0"),
             hop_count: 14,
             next_hop: Ipv4Addr::new(192, 168, 10, 4),
-            precursors: Vec::new(),
+            precursors: HashSet::new(),
             lifetime: Duration::from_millis(0),
         };
         ROUTING_TABLE.set_route(r3.clone());

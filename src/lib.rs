@@ -211,7 +211,7 @@ impl RREQ {
             interface: CONFIG.interface.clone(),
             hop_count: 1,
             next_hop: addr.to_ipv4(),
-            precursors: Vec::new(),
+            precursors: HashSet::new(),
             lifetime: Duration::from_millis(0),
         });
 
@@ -240,7 +240,7 @@ impl RREQ {
                     interface: CONFIG.interface.clone(),
                     hop_count: self.hop_count,
                     next_hop: addr.to_ipv4(),
-                    precursors: Vec::new(),
+                    precursors: HashSet::new(),
                     lifetime: minimal_lifetime,
                 });
             }
@@ -364,7 +364,7 @@ impl RREP {
                 interface: CONFIG.interface.clone(),
                 hop_count: self.hop_count,
                 next_hop: addr.to_ipv4(),
-                precursors: Vec::new(),
+                precursors: HashSet::new(),
                 lifetime: Duration::from_millis(0),
             });
         }
@@ -384,7 +384,7 @@ impl RREP {
                     interface: CONFIG.interface.clone(),
                     hop_count: self.hop_count,
                     next_hop: addr.to_ipv4(),
-                    precursors: Vec::new(),
+                    precursors: HashSet::new(),
                     lifetime: Duration::from_millis(0),
                 }
             }
@@ -428,7 +428,7 @@ impl RREP {
 
             //TODO: fix this
             if let Occupied(mut r) = ROUTING_TABLE.lock().entry(self.dest_ip) {
-                r.get_mut().precursors.push(self.dest_ip);
+                r.get_mut().precursors.insert(self.dest_ip);
             }
 
             //TODO: message route used
@@ -487,7 +487,7 @@ impl RREP {
             interface: String::from("wlan0"),
             hop_count: 14,
             next_hop: Ipv4Addr::new(192, 168, 10, 4),
-            precursors: Vec::new(),
+            precursors: HashSet::new(),
             lifetime: Duration::from_millis(0),
         };
 
@@ -512,7 +512,7 @@ impl RREP {
             ROUTING_TABLE.add_precursor(rreq.dest_ip, forward_route.next_hop);
 
             // Add node the RREQ just crome from to forward route precursors
-            forward_route.precursors.push(Ipv4Addr::new(0, 1, 2, 3)); //TODO: addr
+            forward_route.precursors.insert(Ipv4Addr::new(0, 1, 2, 3)); //TODO: addr
             forward_route.valid = true;
 
             ROUTING_TABLE.put_route(forward_route);

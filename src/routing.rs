@@ -70,9 +70,50 @@ pub struct Route {
     //lifetimeChannel chan bool
 }
 
+//TODO: make this AtomicUsize or RwLock or something
+pub struct SequenceNumber(Mutex<usize>);
+
+impl Default for SequenceNumber {
+    fn default() -> Self {
+        SequenceNumber(Mutex::new(0))
+    }
+}
+
+impl SequenceNumber {
+    pub fn get(&self) -> usize {
+        *self.0.lock().unwrap()
+    }
+    pub fn increment(&self) {
+        *self.0.lock().unwrap() += 1;
+    }
+    pub fn increment_then_get(&self) -> usize {
+        let mut seq_num = self.0.lock().unwrap();
+        *seq_num += 1;
+        *seq_num
+    }
+}
+
+#[cfg(test)]
+mod test_sequence_number {
+    use super::*;
+    lazy_static!{
+        static ref SEQ_NUM: SequenceNumber= SequenceNumber::default();
+    }
+
+    fn test_sequence_number_methods() {
+        let a = SEQ_NUM.get();
+        assert_eq!(a, 0);
+
+        let b = SEQ_NUM.increment_then_get();
+        assert_eq!(a + 1, b);
+
+        SEQ_NUM.increment();
+        assert_eq!(b + 1, SEQ_NUM.get());
+    }
+}
+
 #[cfg(test)]
 mod test_routing_table {
-
     use super::*;
 
     lazy_static!{

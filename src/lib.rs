@@ -221,16 +221,17 @@ impl RREQ {
 
         println!("Received new RREQ from {} for {}", addr, self.dest_ip);
 
+        // Account for this hop
         self.hop_count += 1;
 
         let minimal_lifetime = CONFIG.NET_TRAVERSAL_TIME * 2 -
             CONFIG.NODE_TRAVERSAL_TIME * (2 * u32::from(self.hop_count));
 
         //TODO Ensure inserts are in here properly
-        // Make a reverse route for the Originating IP address
+        // Make or update the reverse route to the Originating IP address
         match ROUTING_TABLE.lock().entry(self.orig_ip) {
+            // If we don't already have a route, create one based on what we know
             Vacant(r) => {
-                // If we don't already have a route, create one based on what we know
                 r.insert(Route {
                     dest_ip: self.orig_ip,
                     dest_seq_num: self.dest_seq_num,
@@ -243,6 +244,7 @@ impl RREQ {
                     lifetime: minimal_lifetime,
                 });
             }
+            // Update the route if we need to
             Occupied(r) => {
                 let r = r.into_mut();
 
@@ -264,7 +266,12 @@ impl RREQ {
             }
         };
 
-        //TODO Add logic to get decide to send RREP or not
+        // If you should generate a RREP do so, otherwise rebroadcast the RREQ
+        if let Some((socket, rrep)) = RREP::generate_rrep(&self) {
+            client(socket, rrep.bit_message().as_ref())
+        }else {
+            client(CONFIG.broadcast_address.to_aodv_sa(),&self.bit_message().as_ref());
+        }
     }
 }
 
@@ -436,28 +443,20 @@ impl RREP {
             //TODO: generalize this!
             client(
                 orig_route.next_hop.to_aodv_sa(),
-                &AodvMessage::Rrep(self.clone()),
+                self.bit_message().as_ref(),
                 );
         }
     }
-    pub fn generate_rrep(rreq: &RREQ) -> Option<(SocketAddr, AodvMessage)> {
+    pub fn generate_rrep(rreq: &RREQ) -> Option<(SocketAddr, Self)> {
         // If you are the destination send an RREP
         if rreq.dest_ip == CONFIG.current_ip {
-            return Some((
-                    CONFIG.broadcast_address.to_aodv_sa(),
-                    AodvMessage::Rrep(RREP::create_rrep(rreq)),
-                    ));
+            return Some(RREP::create_rrep(rreq));
         }
-        // If you have a valid route and sequence number to the destination
-        // send and RREP
+        // If you have a valid route and sequence number to the destination send a RREP
         if let Occupied(r) = ROUTING_TABLE.lock().entry(rreq.dest_ip) {
             let r = r.get();
             if r.valid && r.valid_dest_seq_num && r.dest_seq_num >= rreq.dest_seq_num && !rreq.d {
-                return Some((
-                        CONFIG.broadcast_address.to_aodv_sa(),
-                        //TODO: change this to the actual message
-                        AodvMessage::Rrep(RREP::create_rrep(rreq)),
-                        ));
+                return Some(RREP::create_rrep(rreq));
             }
         }
         // Otherwise don't send a RREP
@@ -465,7 +464,7 @@ impl RREP {
     }
 
     //TODO: Add all the proper generation logic
-    fn create_rrep(rreq: &RREQ) -> RREP {
+    fn create_rrep(rreq: &RREQ) -> (SocketAddr, RREP) {
         let mut rrep = RREP {
             r: false,
             a: false,
@@ -517,7 +516,7 @@ impl RREP {
             ROUTING_TABLE.put_route(forward_route);
         }
 
-        rrep
+        (CONFIG.broadcast_address.to_aodv_sa(), rrep)
     }
 }
 
@@ -608,7 +607,7 @@ impl RERR {
 
         // Send an RERR if you need to
         if let Some((addr, rerr))=  RERR::generate_rerr(udests) {
-            client(addr, &rerr);
+            client(addr, rerr.bit_message().as_ref());
         }
     }
     fn generate_rerr(mut udests: Vec<(Ipv4Addr, u32)>) -> Option<(SocketAddr, AodvMessage)>{

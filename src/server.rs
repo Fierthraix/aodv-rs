@@ -46,8 +46,8 @@ pub fn server() {
 }
 
 /// Send an aodv message on a socket address
-pub fn client(s: SocketAddr, msg: &AodvMessage) {
+pub fn client(s: SocketAddr, msg: &[u8]) {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
 
-    socket.send_to(msg.bit_message().as_ref(), s).unwrap();
+    socket.send_to(msg, s).unwrap();
 }

@@ -11,12 +11,12 @@ use std::collections::HashSet;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 
-pub mod functions;
+pub mod util;
 pub mod routing;
 pub mod server;
 pub mod parse;
 
-use functions::*;
+use util::*;
 use routing::{Route, RoutingTable};
 use server::client;
 use parse::Config;

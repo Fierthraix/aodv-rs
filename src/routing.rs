@@ -71,7 +71,7 @@ pub struct Route {
 }
 
 //TODO: make this AtomicUsize or RwLock or something
-pub struct SequenceNumber(Mutex<usize>);
+pub struct SequenceNumber(Mutex<u32>);
 
 impl Default for SequenceNumber {
     fn default() -> Self {
@@ -80,13 +80,13 @@ impl Default for SequenceNumber {
 }
 
 impl SequenceNumber {
-    pub fn get(&self) -> usize {
+    pub fn get(&self) -> u32 {
         *self.0.lock().unwrap()
     }
     pub fn increment(&self) {
         *self.0.lock().unwrap() += 1;
     }
-    pub fn increment_then_get(&self) -> usize {
+    pub fn increment_then_get(&self) -> u32 {
         let mut seq_num = self.0.lock().unwrap();
         *seq_num += 1;
         *seq_num

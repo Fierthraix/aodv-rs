@@ -20,7 +20,7 @@ pub fn aodv() {
     let socket = UdpSocket::bind(&addr, &handle).unwrap();
     println!("Started listening on {}", AODV_PORT);
 
-    // Get sink/stream for AODV codec
+    // Get stream for AODV codec
     let (_, stream) = socket.framed(AodvCodec).split();
 
     // Handle incoming AODV messages
@@ -47,8 +47,7 @@ pub fn server() {
 
 /// Send an aodv message on a socket address
 pub fn client(s: SocketAddr, msg: &AodvMessage) {
-    use std::net;
-    let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
 
     socket.send_to(msg.bit_message().as_ref(), s).unwrap();
 }

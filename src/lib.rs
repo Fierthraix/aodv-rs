@@ -75,9 +75,8 @@ impl AodvMessage {
         use self::AodvMessage::*;
         match *self {
             Rreq(ref r) => r.bit_message(),
-            Rrep(ref r) => r.bit_message(),
+            Rrep(ref r) | Hello(ref r) => r.bit_message(),
             Rerr(ref r) => r.bit_message(),
-            Hello(ref r) => r.bit_message(),
             Ack => vec![4, 0],
         }
     }

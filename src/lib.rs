@@ -347,16 +347,14 @@ impl RREP {
         b
     }
     pub fn handle_message(&mut self, addr: &SocketAddr) {
-        //TODO: fix this!
         // This is likely a hello message
-        if self.dest_ip == self.orig_ip {
-            return;
+        let mut is_hello = false;
+        if self.dest_ip == self.orig_ip && *addr == CONFIG.broadcast_address.to_aodv_sa() {
+            is_hello = true;
+            println!("Received Hello from {}", addr.to_ipv4());
+        }else{
+            println!("Received RREP from {} for {}", addr.to_ipv4(), self.orig_ip);
         }
-
-        println!("Received RREP from {} for {}", addr.to_ipv4(), self.orig_ip);
-
-        //TODO: if addr == CONFIG.BroadcastAddress we know this is a hello
-        //      message and should handle it appropriately
 
         //NOTE: in this section 'destination' refers to the node that created
         //      the RREP, and the 'originating node' is receiving the RREP
@@ -376,14 +374,13 @@ impl RREP {
             });
         }
 
+        // Account for this hop
         self.hop_count += 1;
 
-        let mut dest_route_changed = false;
-
-        let mut dest_route = match ROUTING_TABLE.lock().entry(self.dest_ip) {
-            Vacant(_) => {
-                dest_route_changed = true;
-                Route {
+        // If the forward route gets changed we need to modify it later
+        let mut dest_route_changed = match ROUTING_TABLE.lock().entry(self.dest_ip) {
+            Vacant(r) => {
+                r.insert( Route {
                     dest_ip: self.orig_ip,
                     dest_seq_num: self.dest_seq_num,
                     valid_dest_seq_num: false,
@@ -393,35 +390,35 @@ impl RREP {
                     next_hop: addr.to_ipv4(),
                     precursors: HashSet::new(),
                     lifetime: Duration::from_millis(0),
-                }
+                });
+                true
             }
-            Occupied(r) => r.get().clone(),
+            Occupied(mut r) => {
+                let dest_route = r.get_mut();
+                // Update the Destination Sequence Number if you need to
+                if !dest_route.valid_dest_seq_num ||
+                    (dest_route.valid_dest_seq_num && self.dest_seq_num > dest_route.dest_seq_num) ||
+                        (dest_route.dest_seq_num == self.dest_seq_num && !dest_route.valid) ||
+                        (dest_route.dest_seq_num == self.dest_seq_num &&
+                         self.hop_count < dest_route.hop_count)
+                        {
+                            dest_route.valid = true;
+                            dest_route.valid_dest_seq_num = true;
+                            dest_route.next_hop = addr.to_ipv4();
+                            dest_route.hop_count = self.hop_count;
+                            dest_route.lifetime = Duration::from_millis(u64::from(self.lifetime));
+                            dest_route.dest_seq_num = self.dest_seq_num;
+
+                            println!("Putting changed route {}", dest_route.dest_ip);
+                            true
+                        } else {
+                            false
+                        }
+            }
         };
 
-        // Update the Destination Sequence Number if you need to
-        if !dest_route.valid_dest_seq_num ||
-            (dest_route.valid_dest_seq_num && self.dest_seq_num > dest_route.dest_seq_num) ||
-                (dest_route.dest_seq_num == self.dest_seq_num && !dest_route.valid) ||
-                (dest_route.dest_seq_num == self.dest_seq_num &&
-                 self.hop_count < dest_route.hop_count)
-                {
-                    dest_route.dest_seq_num = self.dest_seq_num;
-                    dest_route_changed = true;
-                }
-
-        // If the forward route is created/modified, run this:
-        if dest_route_changed {
-            dest_route.valid = true;
-            dest_route.valid_dest_seq_num = true;
-            dest_route.next_hop = addr.to_ipv4();
-            dest_route.hop_count = self.hop_count;
-            dest_route.lifetime = Duration::from_millis(u64::from(self.lifetime));
-            dest_route.dest_seq_num = self.dest_seq_num;
-
-            println!("Putting changed route {}", dest_route.dest_ip);
-        }
-
-        ROUTING_TABLE.put_route(dest_route);
+        // Don't forward hello messages
+        if is_hello {return}
 
         // If you're not the originator node, then forward the RREP and exit
         if CONFIG.current_ip != self.orig_ip && dest_route_changed {

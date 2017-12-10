@@ -271,7 +271,7 @@ impl RREQ {
         if let Some((socket, rrep)) = RREP::generate_rrep(&self, addr) {
             client(socket, rrep.bit_message().as_ref())
         }else {
-            client(CONFIG.broadcast_address.to_aodv_sa(),&self.bit_message().as_ref());
+            client(CONFIG.broadcast_address.to_aodv_sa(), self.bit_message().as_ref());
         }
     }
 }

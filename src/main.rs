@@ -7,12 +7,12 @@ use std::thread;
 use std::env::var;
 use std::process::exit;
 
-use aodv::{parse, server};
+use aodv::{config, server};
 
 
 fn main() {
     // Get command line arguments
-    let args = parse::get_args();
+    let args = config::get_args();
 
     // Start server
     if args.is_present("start_aodv") {

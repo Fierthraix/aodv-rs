@@ -14,16 +14,16 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 pub mod util;
 pub mod routing;
 pub mod server;
-pub mod parse;
+pub mod config;
 
 use util::*;
 use routing::{Route, RoutingTable, SequenceNumber};
 use server::client;
-use parse::Config;
+use config::Config;
 
 lazy_static!{
     static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
-    static ref CONFIG: Config = Config::new(&parse::get_args());
+    static ref CONFIG: Config = Config::new(&config::get_args());
     static ref RREQ_DATABASE: RreqDatabase = RreqDatabase::new();
     static ref SEQ_NUM: SequenceNumber = SequenceNumber::default();
 }

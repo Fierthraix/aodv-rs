@@ -697,124 +697,128 @@ impl RreqDatabase {
     }
 }
 
-#[test]
-fn test_rreq_encoding() {
-    let rreq = RREQ {
-        j: true,
-        r: false,
-        g: true,
-        d: false,
-        u: true,
-        hop_count: 144,
-        rreq_id: 14425,
-        dest_ip: Ipv4Addr::new(192, 168, 10, 14),
-        dest_seq_num: 12,
-        orig_ip: Ipv4Addr::new(192, 168, 10, 19),
-        orig_seq_num: 63,
-    };
+#[cfg(test)]
+mod test_encoding {
+    use super::*;
 
-    let bytes: &[u8] = &[
-        1,
-        168,
-        0,
-        144,
-        0,
-        0,
-        56,
-        89,
-        192,
-        168,
-        10,
-        14,
-        0,
-        0,
-        0,
-        12,
-        192,
-        168,
-        10,
-        19,
-        0,
-        0,
-        0,
-        63,
+    #[test]
+    fn test_rreq_encoding() {
+        let rreq = RREQ {
+            j: true,
+            r: false,
+            g: true,
+            d: false,
+            u: true,
+            hop_count: 144,
+            rreq_id: 14425,
+            dest_ip: Ipv4Addr::new(192, 168, 10, 14),
+            dest_seq_num: 12,
+            orig_ip: Ipv4Addr::new(192, 168, 10, 19),
+            orig_seq_num: 63,
+        };
+
+        let bytes: &[u8] = &[
+            1,
+            168,
+            0,
+            144,
+            0,
+            0,
+            56,
+            89,
+            192,
+            168,
+            10,
+            14,
+            0,
+            0,
+            0,
+            12,
+            192,
+            168,
+            10,
+            19,
+            0,
+            0,
+            0,
+            63,
+            ];
+        assert_eq!(bytes.to_vec(), rreq.bit_message());
+        assert_eq!(rreq, RREQ::new(bytes).unwrap())
+    }
+
+    #[test]
+    fn test_rrep_encoding() {
+        let rrep = RREP {
+            r: true,
+            a: false,
+            prefix_size: 31,
+            hop_count: 98,
+            dest_ip: Ipv4Addr::new(192, 168, 10, 14),
+            dest_seq_num: 12,
+            orig_ip: Ipv4Addr::new(192, 168, 10, 19),
+            lifetime: 32603,
+        };
+
+        let bytes: &[u8] = &[
+            2,
+            128,
+            31,
+            98,
+            192,
+            168,
+            10,
+            14,
+            0,
+            0,
+            0,
+            12,
+            192,
+            168,
+            10,
+            19,
+            0,
+            0,
+            127,
+            91,
+            ];
+
+        assert_eq!(bytes.to_vec(), rrep.bit_message());
+        assert_eq!(rrep, RREP::new(bytes).unwrap())
+    }
+
+    #[test]
+    fn test_rerr_encoding() {
+        let mut udest_list = Vec::with_capacity(3);
+        udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
+        udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
+        let rerr = RERR {
+            n: false,
+            dest_count: 2,
+            udest_list: udest_list,
+        };
+        let bytes: &[u8] = &[
+            3, 0, 0, 2, 192, 168, 10, 18, 0, 7,
+            93, 195, 255, 255, 255, 255, 0, 0, 0, 0
         ];
-    assert_eq!(bytes.to_vec(), rreq.bit_message());
-    assert_eq!(rreq, RREQ::new(bytes).unwrap())
-}
+        assert_eq!(bytes, rerr.bit_message().as_slice());
+        assert_eq!(rerr, RERR::new(bytes).unwrap());
 
-#[test]
-fn test_rrep_encoding() {
-    let rrep = RREP {
-        r: true,
-        a: false,
-        prefix_size: 31,
-        hop_count: 98,
-        dest_ip: Ipv4Addr::new(192, 168, 10, 14),
-        dest_seq_num: 12,
-        orig_ip: Ipv4Addr::new(192, 168, 10, 19),
-        lifetime: 32603,
-    };
-
-    let bytes: &[u8] = &[
-        2,
-        128,
-        31,
-        98,
-        192,
-        168,
-        10,
-        14,
-        0,
-        0,
-        0,
-        12,
-        192,
-        168,
-        10,
-        19,
-        0,
-        0,
-        127,
-        91,
+        let mut udest_list = Vec::with_capacity(3);
+        udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
+        udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
+        udest_list.push((Ipv4Addr::new(192,168,10,15), 58392910));
+        let rerr = RERR {
+            n: false,
+            dest_count: 3,
+            udest_list: udest_list,
+        };
+        let bytes: &[u8] = &[
+            3, 0, 0, 3, 192, 168, 10, 18, 0, 7,
+            93, 195, 255, 255, 255, 255, 0, 0, 0, 0, 192, 168, 10, 15, 3, 123, 1, 78
         ];
 
-    assert_eq!(bytes.to_vec(), rrep.bit_message());
-    assert_eq!(rrep, RREP::new(bytes).unwrap())
+        assert_eq!(bytes, rerr.bit_message().as_slice());
+        assert_eq!(rerr, RERR::new(bytes).unwrap());
+    }
 }
-
-#[test]
-fn test_rerr_encoding() {
-    let mut udest_list = Vec::with_capacity(3);
-    udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
-    udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
-    let rerr = RERR {
-        n: false,
-        dest_count: 2,
-        udest_list: udest_list,
-    };
-    let bytes: &[u8] = &[
-        3, 0, 0, 2, 192, 168, 10, 18, 0, 7,
-        93, 195, 255, 255, 255, 255, 0, 0, 0, 0
-    ];
-    assert_eq!(bytes, rerr.bit_message().as_slice());
-    assert_eq!(rerr, RERR::new(bytes).unwrap());
-
-    let mut udest_list = Vec::with_capacity(3);
-    udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
-    udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
-    udest_list.push((Ipv4Addr::new(192,168,10,15), 58392910));
-    let rerr = RERR {
-        n: false,
-        dest_count: 3,
-        udest_list: udest_list,
-    };
-    let bytes: &[u8] = &[
-        3, 0, 0, 3, 192, 168, 10, 18, 0, 7,
-        93, 195, 255, 255, 255, 255, 0, 0, 0, 0, 192, 168, 10, 15, 3, 123, 1, 78
-    ];
-
-    assert_eq!(bytes, rerr.bit_message().as_slice());
-    assert_eq!(rerr, RERR::new(bytes).unwrap());
-}
-

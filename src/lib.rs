@@ -37,10 +37,10 @@ use tokio_core::net::UdpCodec;
 pub struct ParseError;
 
 impl ParseError {
-    pub fn new() -> io::Error {
+    pub fn new<E>(error: E) -> io::Error where E: Into<Box<std::error::Error + Send + Sync>>{
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Unable to parse bit message as AODV message",
+            error,
             )
     }
 }
@@ -59,7 +59,7 @@ impl AodvMessage {
     /// Try to convert bytes into an aodv message struct or return a ParseError
     pub fn parse(b: &[u8]) -> Result<Self, io::Error> {
         if b.is_empty() {
-            return Err(ParseError::new());
+            return Err(ParseError::new("Buffer is empty"));
         }
         use self::AodvMessage::*;
         // Type, Length, Multiple of 4 or not
@@ -68,7 +68,7 @@ impl AodvMessage {
             (2, 20, 0) => Ok(Rrep(RREP::new(b)?)),
             (3, _, 0) => Ok(Rerr(RERR::new(b)?)),
             (4, 2, 2) => Ok(Ack),
-            (_, _, _) => Err(ParseError::new()),
+            (_, _, _) => Err(ParseError::new("Wrong length or type bit")),
         }
     }
     /// Convert an aodv control message into its representation as a bitfield
@@ -157,12 +157,10 @@ impl RREQ {
     /// Return a RREQ message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREQ, Error> {
         if b.len() != 24 {
-            //   return Err("This message is not the right size");
-            return Err(ParseError::new());
+            return Err(ParseError::new(format!("RREQ messages are 24 bytes, not {}", b.len())));
         }
         if b[0] != 1 {
-            //  return Err("This byte message is not the right type");
-            return Err(ParseError::new());
+            return Err(ParseError::new("This is not a RREQ message"));
         }
         Ok(RREQ {
             j: 1 << 7 & b[1] != 0,
@@ -310,12 +308,10 @@ impl RREP {
     /// Return a RREP message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREP, Error> {
         if b.len() != 20 {
-            //return Err("This byte message is not the right size");
-            return Err(ParseError::new());
+            return Err(ParseError::new(format!("RREP messages are 20 bytes, not {}",b.len())));
         }
         if b[0] != 2 {
-            //return Err("This byte message is not the right type");
-            return Err(ParseError::new());
+            return Err(ParseError::new("This is not a RREP message"));
         }
         Ok(RREP {
             r: 1 << 7 & b[1] != 0,
@@ -378,7 +374,7 @@ impl RREP {
         self.hop_count += 1;
 
         // If the forward route gets changed we need to modify it later
-        let mut dest_route_changed = match ROUTING_TABLE.lock().entry(self.dest_ip) {
+        let dest_route_changed = match ROUTING_TABLE.lock().entry(self.dest_ip) {
             Vacant(r) => {
                 r.insert( Route {
                     dest_ip: self.orig_ip,
@@ -529,12 +525,10 @@ impl RERR {
     /// Return a RERR message from a byte slice
     pub fn new(b: &[u8]) -> Result<RERR, Error> {
         if (b.len()-4) % 8 != 0 || b.len() <12 {
-            //return Err("This byte message is not the right size");
-            return Err(ParseError::new());
+            return Err(ParseError::new("This is not the right size for a RERR message"));
         }
         if b[0] != 3{
-            //return Err("This byte message is not the right type");
-            return Err(ParseError::new());
+            return Err(ParseError::new("This message is not a RERR message"));
         }
 
         let mut udest_list = Vec::new();

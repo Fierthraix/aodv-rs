@@ -639,45 +639,49 @@ impl RreqDatabase {
     /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
     /// of it for PATH_DISCOVERY_TIME
     pub fn seen_before(&self, ip: Ipv4Addr, rreq_id: u32) -> bool {
-        let mut db = self.lock();
-
-        // Try to get the entry for the given ip
-        if !db.contains_key(&ip) {
-            db.insert(ip, vec![rreq_id]);
-            false
-        } else {
-            let v = db.get_mut(&ip).unwrap(); // Unwrap is ok as we just checked for existence
-            if v.contains(&rreq_id) {
-                true
-                    // If you haven't seen an ip then add it and begin it's removal timer
-            } else {
-                v.push(rreq_id);
-                // TODO: use futures or something instead of a thread
-                thread::spawn(move || { RreqDatabase::manage_rreq(ip, rreq_id); });
+        match self.lock().entry(ip) {
+            // If the IP address has never sent a RREQ create an entry for it
+            Vacant(r) => {
+                r.insert(vec![rreq_id]);
+                self.manage_rreq(ip, rreq_id);
                 false
+            },
+            // If the IP address has sent an RREQ before check if it was this one
+            Occupied(r) => {
+                let r = r.into_mut();
+                if r.contains(&rreq_id) {
+                    true
+                } else {
+                    r.push(rreq_id);
+                    self.manage_rreq(ip, rreq_id);
+                    false
+                }
             }
         }
     }
 
-    fn manage_rreq(ip: Ipv4Addr, rreq_id: u32) {
+    fn manage_rreq(&self, ip: Ipv4Addr, rreq_id: u32) {
 
-        //TODO replace sleep with a future
-        thread::sleep(CONFIG.PATH_DISCOVERY_TIME);
+        // TODO: use futures or something instead of a thread
+        thread::spawn(move ||{
+            //TODO replace sleep with a future
+            thread::sleep(CONFIG.PATH_DISCOVERY_TIME);
 
-        let mut db = RREQ_DATABASE.lock();
+            let mut db = RREQ_DATABASE.lock();
 
-        // Scoped to remove reference to db and allow cleanup code to run
-        {
-            let v = db.get_mut(&ip).unwrap(); // This unwrap *shoudln't* fail, not 100% sure tho
+            // Scoped to remove reference to db and allow cleanup code to run
+            {
+                let v = db.get_mut(&ip).unwrap(); // This unwrap *shoudln't* fail, not 100% sure tho
 
-            // Remove the current rreq_id from the list
-            v.retain(|id| id != &rreq_id); // Keep elements that *aren't* equal to rreq_id
-        }
+                // Remove the current rreq_id from the list
+                v.retain(|id| id != &rreq_id); // Keep elements that *aren't* equal to rreq_id
+            }
 
-        // Clean up empty hash maps
-        if db.get_mut(&ip).unwrap().is_empty() {
-            db.remove(&ip);
-        }
+            // Clean up empty hash maps
+            if db.get_mut(&ip).unwrap().is_empty() {
+                db.remove(&ip);
+            }
+        });
     }
 
     fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {

@@ -100,6 +100,7 @@ mod test_sequence_number {
         static ref SEQ_NUM: SequenceNumber= SequenceNumber::default();
     }
 
+    #[test]
     fn test_sequence_number_methods() {
         let a = SEQ_NUM.get();
         assert_eq!(a, 0);

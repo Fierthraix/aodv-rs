@@ -52,6 +52,12 @@ impl RoutingTable {
             r.precursors.insert(precursor);
         }
     }
+    /// Called when a route is used so we reset the timer that makes it invalid
+    pub fn used(&self, route: Ipv4Addr) {
+        if let Occupied(r) = self.lock().entry(route) {
+            unimplemented!()
+        }
+    }
 }
 
 // TODO remove this `#allow[]`
@@ -116,6 +122,7 @@ mod test_sequence_number {
 #[cfg(test)]
 mod test_routing_table {
     use super::*;
+    use config::{self, Config};
 
     lazy_static!{
         static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
@@ -123,7 +130,6 @@ mod test_routing_table {
 
     #[test]
     fn test_routing_table_methods() {
-
         let r1 = Route {
             dest_ip: Ipv4Addr::new(192, 168, 10, 2),
             dest_seq_num: 45641,
@@ -184,5 +190,82 @@ mod test_routing_table {
         r6.hop_count -= 2;
         ROUTING_TABLE.set_route(r6.clone());
         assert_eq!(*ROUTING_TABLE.lock().get(&r6.dest_ip).unwrap(), r6);
+    }
+
+    #[test]
+    fn test_lifetime_management() {
+        use std::time::Duration;
+        use std::thread::sleep;
+        use std::collections::hash_map::Entry::{Occupied, Vacant};
+
+        // Make the test happen quickly
+        #[allow(non_snake_case)]
+        let mut CONFIG: Config = Config::new(&config::get_args());
+
+        // Use 192.168.10.40-49
+        CONFIG.ACTIVE_ROUTE_TIMEOUT = Duration::from_millis(50);
+
+        // Add test route
+        let r1 = Route {
+            dest_ip: Ipv4Addr::new(192, 168, 10, 42),
+            dest_seq_num: 45641,
+            valid_dest_seq_num: true,
+            valid: true,
+            interface: String::from("wlan0"),
+            hop_count: 14,
+            next_hop: Ipv4Addr::new(192, 168, 10, 44),
+            precursors: HashSet::new(),
+            lifetime: Duration::from_millis(0),
+        };
+
+        ROUTING_TABLE.set_route(r1.clone());
+
+        // Wait to see if it's marked invalid when it should be
+        sleep(Duration::from_millis(50));
+        match ROUTING_TABLE.lock().entry(r1.dest_ip) {
+            Occupied(r) => {
+                assert!(!r.get().valid);
+            }
+            _ => panic!("There should be a routing table entry!"),
+        }
+
+        // Add a test route
+        let r2 = Route {
+            dest_ip: Ipv4Addr::new(192, 168, 10, 43),
+            dest_seq_num: 45641,
+            valid_dest_seq_num: true,
+            valid: true,
+            interface: String::from("wlan0"),
+            hop_count: 14,
+            next_hop: Ipv4Addr::new(192, 168, 10, 44),
+            precursors: HashSet::new(),
+            lifetime: Duration::from_millis(0),
+        };
+        ROUTING_TABLE.set_route(r2.clone());
+
+        // Wait 2/3 of it's lifetime
+        sleep(CONFIG.ACTIVE_ROUTE_TIMEOUT * 2 / 3);
+
+        // Ping it to keep it alive
+        ROUTING_TABLE.used(r2.dest_ip);
+
+        sleep(CONFIG.ACTIVE_ROUTE_TIMEOUT * 2 / 3);
+
+        // Check it is still alive
+        match ROUTING_TABLE.lock().entry(r2.dest_ip) {
+            Occupied(r) => {
+                assert!(r.get().valid);
+            }
+            _ => panic!("There should be a routing table entry!"),
+        }
+
+        // Revive dead route and check it's alive
+        ROUTING_TABLE.used(r1.dest_ip);
+        match ROUTING_TABLE.lock().entry(r1.dest_ip) {
+            Occupied(r) => {
+                assert!(r.get().valid);
+            }
+            _ => panic!("There should be a routing table entry!"),
+        }
     }
 }

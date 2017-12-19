@@ -1,4 +1,38 @@
+extern crate tokio_core;
+use tokio_core::reactor::{Core, Handle};
+
+use std::cell::RefCell;
+
 use super::*;
+
+/// A struct made to have a single tokio core running on a thread with static namespacing
+pub struct CoreAndHandle {
+    core: RefCell<Core>,
+    handle: RefCell<Handle>,
+}
+
+impl CoreAndHandle {
+    pub fn new() -> Self {
+        let core = Core::new().unwrap();
+        let handle = core.handle();
+        CoreAndHandle {
+            core: RefCell::new(core),
+            handle: RefCell::new(handle),
+        }
+    }
+}
+
+pub fn with_local_core<T, F: FnOnce(&Core) -> T>(cls: F) -> T {
+    CORE.with(|o| cls(&*o.core.borrow()))
+}
+
+pub fn with_local_core_mut<T, F: FnOnce(&mut Core) -> T>(cls: F) -> T {
+    CORE.with(|o| cls(&mut *o.core.borrow()))
+}
+
+pub fn local_handle<T, F: FnOnce(&Handle) -> T>(cls: F) -> T {
+    CORE.with(|o| cls(&*o.handle.borrow()))
+}
 
 //TODO: make aodv messages implement BigEndianBytes instaed of `parse` and `bit_message`
 /// Convert a type to its byte representation in Big Endian Bytes

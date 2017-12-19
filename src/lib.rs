@@ -10,7 +10,6 @@ use std::time::Duration;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-
 pub mod util;
 pub mod routing;
 pub mod server;
@@ -20,6 +19,10 @@ use util::*;
 use routing::{Route, RoutingTable, SequenceNumber};
 use server::client;
 use config::Config;
+
+thread_local!{
+    pub static CORE: CoreAndHandle = CoreAndHandle::new();
+}
 
 lazy_static!{
     static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();

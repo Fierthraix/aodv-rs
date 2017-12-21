@@ -1,8 +1,16 @@
+extern crate futures;
+extern crate tokio_timer;
+
 use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use std::net::Ipv4Addr;
+
+use super::*;
+
+use futures::prelude::*;
+use self::tokio_timer::*;
 
 /// The internal representation of the aodv routing table
 pub struct RoutingTable(Mutex<HashMap<Ipv4Addr, Route>>);
@@ -33,8 +41,8 @@ impl RoutingTable {
                 let old_route = r.into_mut();
                 // If it does exist, make sure none of these are true before replacing
                 if !(!old_route.valid_dest_seq_num && route.dest_seq_num > old_route.dest_seq_num &&
-                         (old_route.dest_seq_num == route.dest_seq_num &&
-                              route.hop_count + 1 < old_route.hop_count))
+                     (old_route.dest_seq_num == route.dest_seq_num &&
+                      route.hop_count + 1 < old_route.hop_count))
                 {
                     *old_route = route;
                 };
@@ -99,23 +107,67 @@ impl SequenceNumber {
     }
 }
 
-#[cfg(test)]
-mod test_sequence_number {
-    use super::*;
-    lazy_static!{
-        static ref SEQ_NUM: SequenceNumber= SequenceNumber::default();
+pub struct RreqDatabase(Mutex<HashMap<Ipv4Addr, Vec<u32>>>);
+
+impl RreqDatabase {
+    pub fn new() -> Self {
+        RreqDatabase(Mutex::new(HashMap::new()))
     }
 
-    #[test]
-    fn test_sequence_number_methods() {
-        let a = SEQ_NUM.get();
-        assert_eq!(a, 0);
+    /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
+    /// of it for PATH_DISCOVERY_TIME
+    pub fn seen_before(&self, ip: Ipv4Addr, rreq_id: u32) -> bool {
+        match self.lock().entry(ip) {
+            // If the IP address has never sent a RREQ create an entry for it
+            Vacant(r) => {
+                r.insert(vec![rreq_id]);
+                self.manage_rreq(ip, rreq_id);
+                false
+            }
+            // If the IP address has sent an RREQ before check if it was this one
+            Occupied(r) => {
+                let r = r.into_mut();
+                if r.contains(&rreq_id) {
+                    true
+                } else {
+                    r.push(rreq_id);
+                    println!(
+                        "\n\n\n\n***********************\nBout to manage RREQ\n*****************\n\n\n"
+                        );
+                    self.manage_rreq(ip, rreq_id);
+                    false
+                }
+            }
+        }
+    }
 
-        let b = SEQ_NUM.increment_then_get();
-        assert_eq!(a + 1, b);
+    fn manage_rreq(&self, ip: Ipv4Addr, rreq_id: u32) {
+        println!("\n\n\n\n***********************\nManaging RREQ\n*****************\n\n\n");
+        CORE::run(Timer::default().sleep(CONFIG.PATH_DISCOVERY_TIME).and_then(|_| {
 
-        SEQ_NUM.increment();
-        assert_eq!(b + 1, SEQ_NUM.get());
+            let mut db = RREQ_DATABASE.lock();
+
+            // Scoped to remove reference to db and allow cleanup code to run
+            {
+                let v = db.get_mut(&ip).unwrap(); // This unwrap *shoudln't* fail, not 100% sure tho
+
+                // Remove the current rreq_id from the list
+                v.retain(|id| id != &rreq_id); // Keep elements that *aren't* equal to rreq_id
+            }
+
+            // Clean up empty hash maps
+            if db.get_mut(&ip).unwrap().is_empty() {
+                db.remove(&ip);
+            }
+            Ok(())
+        })).unwrap();
+    }
+
+    fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {
+        match self.0.lock() {
+            Ok(r) => r,
+            Err(e) => panic!("error locking rreq database: {}", e),
+        }
     }
 }
 
@@ -198,13 +250,6 @@ mod test_routing_table {
         use std::thread::sleep;
         use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-        // Make the test happen quickly
-        #[allow(non_snake_case)]
-        let mut CONFIG: Config = Config::new(&config::get_args());
-
-        // Use 192.168.10.40-49
-        CONFIG.ACTIVE_ROUTE_TIMEOUT = Duration::from_millis(50);
-
         // Add test route
         let r1 = Route {
             dest_ip: Ipv4Addr::new(192, 168, 10, 42),
@@ -267,5 +312,51 @@ mod test_routing_table {
             }
             _ => panic!("There should be a routing table entry!"),
         }
+    }
+}
+
+#[cfg(test)]
+mod test_sequence_number {
+    use super::*;
+    lazy_static!{
+        static ref SEQ_NUM: SequenceNumber= SequenceNumber::default();
+    }
+
+    #[test]
+    fn test_sequence_number_methods() {
+        let a = SEQ_NUM.get();
+        assert_eq!(a, 0);
+
+        let b = SEQ_NUM.increment_then_get();
+        assert_eq!(a + 1, b);
+
+        SEQ_NUM.increment();
+        assert_eq!(b + 1, SEQ_NUM.get());
+    }
+}
+
+#[cfg(test)]
+mod test_rreq_database {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use std::time::Duration;
+    use std::thread::sleep;
+
+    #[test]
+    fn test_methods() {
+        let ip1 = Ipv4Addr::new(192, 168, 10, 52);
+
+        // Receive RREQ once
+        assert!(!RREQ_DATABASE.seen_before(ip1, 4343));
+
+        // Receive same RREQ
+        assert!(RREQ_DATABASE.seen_before(ip1, 4343));
+
+        // Wait for RREQ to self-delete
+        //sleep(CONFIG.PATH_DISCOVERY_TIME*3/2);
+        sleep(CONFIG.PATH_DISCOVERY_TIME * 3);
+
+        // Check table was deleted properly
+        assert!(RREQ_DATABASE.lock().get(&ip1).is_none());
     }
 }

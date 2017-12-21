@@ -16,7 +16,7 @@ pub mod server;
 pub mod config;
 
 use util::*;
-use routing::{Route, RoutingTable, SequenceNumber};
+use routing::*;
 use server::client;
 use config::Config;
 
@@ -619,74 +619,6 @@ impl RERR {
                 dest_count: udests.len() as u8,
                 udest_list: udests,
             })))
-        }
-    }
-}
-
-// TODO: remove and use futures and timouts instead
-use std::thread;
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
-
-pub struct RreqDatabase(Mutex<HashMap<Ipv4Addr, Vec<u32>>>);
-
-impl RreqDatabase {
-    pub fn new() -> Self {
-        RreqDatabase(Mutex::new(HashMap::new()))
-    }
-
-    /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
-    /// of it for PATH_DISCOVERY_TIME
-    pub fn seen_before(&self, ip: Ipv4Addr, rreq_id: u32) -> bool {
-        match self.lock().entry(ip) {
-            // If the IP address has never sent a RREQ create an entry for it
-            Vacant(r) => {
-                r.insert(vec![rreq_id]);
-                self.manage_rreq(ip, rreq_id);
-                false
-            },
-            // If the IP address has sent an RREQ before check if it was this one
-            Occupied(r) => {
-                let r = r.into_mut();
-                if r.contains(&rreq_id) {
-                    true
-                } else {
-                    r.push(rreq_id);
-                    self.manage_rreq(ip, rreq_id);
-                    false
-                }
-            }
-        }
-    }
-
-    fn manage_rreq(&self, ip: Ipv4Addr, rreq_id: u32) {
-
-        // TODO: use futures or something instead of a thread
-        thread::spawn(move ||{
-            //TODO replace sleep with a future
-            thread::sleep(CONFIG.PATH_DISCOVERY_TIME);
-
-            let mut db = RREQ_DATABASE.lock();
-
-            // Scoped to remove reference to db and allow cleanup code to run
-            {
-                let v = db.get_mut(&ip).unwrap(); // This unwrap *shoudln't* fail, not 100% sure tho
-
-                // Remove the current rreq_id from the list
-                v.retain(|id| id != &rreq_id); // Keep elements that *aren't* equal to rreq_id
-            }
-
-            // Clean up empty hash maps
-            if db.get_mut(&ip).unwrap().is_empty() {
-                db.remove(&ip);
-            }
-        });
-    }
-
-    fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {
-        match self.0.lock() {
-            Ok(r) => r,
-            Err(e) => panic!("error locking rreq database: {}", e),
         }
     }
 }

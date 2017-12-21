@@ -175,6 +175,7 @@ impl Config {
             (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as u32;
     }
 }
+
 impl Default for Config {
     /// Return the default config as per section 10. of the RFC
     fn default() -> Self {

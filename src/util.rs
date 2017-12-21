@@ -1,37 +1,41 @@
 extern crate tokio_core;
+extern crate futures;
+use futures::Future;
 use tokio_core::reactor::{Core, Handle};
 
 use std::cell::RefCell;
 
 use super::*;
 
+
+thread_local!{
+    static _CORE: CORE = CORE::new();
+}
+
 /// A struct made to have a single tokio core running on a thread with static namespacing
-pub struct CoreAndHandle {
+pub struct CORE {
     core: RefCell<Core>,
     handle: RefCell<Handle>,
 }
 
-impl CoreAndHandle {
+impl CORE {
     pub fn new() -> Self {
         let core = Core::new().unwrap();
         let handle = core.handle();
-        CoreAndHandle {
+        CORE {
             core: RefCell::new(core),
             handle: RefCell::new(handle),
         }
     }
-}
-
-pub fn with_local_core<T, F: FnOnce(&Core) -> T>(cls: F) -> T {
-    CORE.with(|o| cls(&*o.core.borrow()))
-}
-
-pub fn with_local_core_mut<T, F: FnOnce(&mut Core) -> T>(cls: F) -> T {
-    CORE.with(|o| cls(&mut *o.core.borrow()))
-}
-
-pub fn local_handle<T, F: FnOnce(&Handle) -> T>(cls: F) -> T {
-    CORE.with(|o| cls(&*o.handle.borrow()))
+    pub fn handle() -> Handle {
+        _CORE.with(|o| o.handle.borrow().clone())
+    }
+    pub fn run<F>(f: F) -> Result<F::Item, F::Error>
+    where
+        F: Future,
+    {
+        _CORE.with(|o| o.core.borrow_mut().run(f))
+    }
 }
 
 //TODO: make aodv messages implement BigEndianBytes instaed of `parse` and `bit_message`

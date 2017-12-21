@@ -20,10 +20,6 @@ use routing::{Route, RoutingTable, SequenceNumber};
 use server::client;
 use config::Config;
 
-thread_local!{
-    pub static CORE: CoreAndHandle = CoreAndHandle::new();
-}
-
 lazy_static!{
     static ref ROUTING_TABLE: RoutingTable = RoutingTable::new();
     static ref CONFIG: Config = Config::new(&config::get_args());

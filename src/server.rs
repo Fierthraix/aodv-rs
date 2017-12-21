@@ -12,9 +12,7 @@ pub fn aodv() {
     // Get address
     let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), AODV_PORT);
 
-    // Get new core/handle
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
+    let handle = CORE::handle();
 
     //  Bind to Address
     let socket = UdpSocket::bind(&addr, &handle).unwrap();
@@ -29,7 +27,7 @@ pub fn aodv() {
         future::ok(())
     });
 
-    let _server = core.run(stream);
+    let _server = CORE::run(stream);
 }
 
 /// Internal instance server

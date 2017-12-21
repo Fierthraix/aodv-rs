@@ -41,8 +41,8 @@ impl RoutingTable {
                 let old_route = r.into_mut();
                 // If it does exist, make sure none of these are true before replacing
                 if !(!old_route.valid_dest_seq_num && route.dest_seq_num > old_route.dest_seq_num &&
-                     (old_route.dest_seq_num == route.dest_seq_num &&
-                      route.hop_count + 1 < old_route.hop_count))
+                         (old_route.dest_seq_num == route.dest_seq_num &&
+                              route.hop_count + 1 < old_route.hop_count))
                 {
                     *old_route = route;
                 };
@@ -116,36 +116,43 @@ impl RreqDatabase {
 
     /// Returns a bool for whether or not a particular RREQ ID has been seen before and keeps track
     /// of it for PATH_DISCOVERY_TIME
-    pub fn seen_before(&self, ip: Ipv4Addr, rreq_id: u32) -> bool {
+    pub fn seen_before(&'static self, ip: Ipv4Addr, rreq_id: u32) -> bool {
+        let mut seen_before = false;
+        let mut need_to_manage = false;
         match self.lock().entry(ip) {
             // If the IP address has never sent a RREQ create an entry for it
             Vacant(r) => {
                 r.insert(vec![rreq_id]);
-                self.manage_rreq(ip, rreq_id);
-                false
+                need_to_manage = true;
             }
             // If the IP address has sent an RREQ before check if it was this one
             Occupied(r) => {
                 let r = r.into_mut();
                 if r.contains(&rreq_id) {
-                    true
+                    seen_before = true;
                 } else {
                     r.push(rreq_id);
-                    println!(
-                        "\n\n\n\n***********************\nBout to manage RREQ\n*****************\n\n\n"
-                        );
-                    self.manage_rreq(ip, rreq_id);
-                    false
+                    println!("Sending seen before");
+                    need_to_manage = true;
+                    println!("Returned form fun with thing running in background");
+                    seen_before = false;
                 }
             }
         }
+        if need_to_manage {
+            self.manage_rreq(ip, rreq_id);
+        }
+        seen_before
     }
 
-    fn manage_rreq(&self, ip: Ipv4Addr, rreq_id: u32) {
-        println!("\n\n\n\n***********************\nManaging RREQ\n*****************\n\n\n");
-        CORE::run(Timer::default().sleep(CONFIG.PATH_DISCOVERY_TIME).and_then(|_| {
+    fn manage_rreq(&'static self, ip: Ipv4Addr, rreq_id: u32) {
+        //CORE::run(Timer::default().sleep(CONFIG.PATH_DISCOVERY_TIME).and_then(|_| {
+        use std::thread;
+        thread::spawn(move || {
 
-            let mut db = RREQ_DATABASE.lock();
+            thread::sleep(CONFIG.PATH_DISCOVERY_TIME);
+
+            let mut db = self.lock();
 
             // Scoped to remove reference to db and allow cleanup code to run
             {
@@ -159,8 +166,9 @@ impl RreqDatabase {
             if db.get_mut(&ip).unwrap().is_empty() {
                 db.remove(&ip);
             }
-            Ok(())
-        })).unwrap();
+            //Ok(())
+        });
+        //})).unwrap();
     }
 
     fn lock(&self) -> MutexGuard<HashMap<Ipv4Addr, Vec<u32>>> {
@@ -353,8 +361,7 @@ mod test_rreq_database {
         assert!(RREQ_DATABASE.seen_before(ip1, 4343));
 
         // Wait for RREQ to self-delete
-        //sleep(CONFIG.PATH_DISCOVERY_TIME*3/2);
-        sleep(CONFIG.PATH_DISCOVERY_TIME * 3);
+        sleep(CONFIG.PATH_DISCOVERY_TIME * 3 / 2);
 
         // Check table was deleted properly
         assert!(RREQ_DATABASE.lock().get(&ip1).is_none());

@@ -1,0 +1,18 @@
+[package]
+name = "aodv-rs"
+version = "0.1.0"
+authors = ["Lucas Rooyakkers <lucas.rooyakkers@drdc.rddc.gc.ca>"]
+
+[dependencies]
+chrono = "0.4"
+time = "0.1"
+futures = "0.1"
+bytes = "0.4"
+tokio = "0.1"
+tokio-io = "0.1"
+tokio-timer = "0.1"
+yaml-rust="0.3"
+log="0.3"
+rayon = "1.0"
+clap= "2.31"
+lazy_static="0.2"

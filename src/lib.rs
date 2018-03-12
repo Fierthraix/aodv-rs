@@ -19,6 +19,7 @@ pub const AODV_PORT: u16 = 654;
 pub const INSTANCE_PORT: u16 = 15_292;
 
 /// The enum for every sort of aodv control message
+#[derive(Clone, Debug, PartialEq)]
 pub enum AodvMessage {
     Rreq(RREQ),
     Rrep(RREP),
@@ -70,6 +71,33 @@ impl AodvMessage {
     }
 }
 
+/// The codec for converting aodv control messages to bytes and back through tokio
+pub struct AodvCodec;
+
+impl Encoder for AodvCodec {
+    type Item = AodvMessage;
+    type Error = io::Error;
+
+    fn encode(&mut self, msg: AodvMessage, buf: &mut BytesMut) -> Result<(), io::Error> {
+        let msg = msg.bit_message();
+        buf.reserve(msg.len());
+        buf.put(msg);
+        Ok(())
+    }
+}
+
+impl Decoder for AodvCodec {
+    type Item = AodvMessage;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match AodvMessage::parse(&src) {
+            Ok(msg) => Ok(Some(msg)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 ///```text
 ///RREQ Message Format:
 ///0                   1                   2                   3
@@ -88,7 +116,7 @@ impl AodvMessage {
 ///|                  Originator Sequence Number                   |
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///```
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RREQ {
     pub j: bool, // Join flag
     pub r: bool, // Repair flag

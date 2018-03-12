@@ -5,7 +5,7 @@ extern crate aodv;
 use std::env::var;
 use std::process::exit;
 
-use aodv::config;
+use aodv::{config, server};
 
 fn main() {
     // Get command line arguments
@@ -26,7 +26,7 @@ fn main() {
         }
 
         // Start internal server
-        unimplemented!();
+        server::aodv();
 
     } else {
         println!("{}", args.usage());

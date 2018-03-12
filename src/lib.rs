@@ -1,14 +1,19 @@
+extern crate bytes;
 extern crate byteorder;
+extern crate tokio_io;
 
 use std::net::{Ipv4Addr, SocketAddr};
-use std::io::{self, Error};
+use std::io;
 
+use bytes::{Bytes, BufMut, BytesMut};
 use byteorder::{BigEndian, ByteOrder};
+use tokio_io::codec::{Encoder, Decoder};
 
 pub mod config;
-mod util;
+pub mod server;
 
-use util::*;
+#[macro_use]
+mod util;
 
 pub const AODV_PORT: u16 = 654;
 pub const INSTANCE_PORT: u16 = 15_292;
@@ -27,7 +32,7 @@ impl AodvMessage {
     /// Try to convert bytes into an aodv message struct or return a ParseError
     pub fn parse(b: &[u8]) -> Result<Self, io::Error> {
         if b.is_empty() {
-            return Err(ParseError::new("Buffer is empty"));
+            return Err(parse_error!("Buffer is empty"));
         }
         use self::AodvMessage::*;
         // Type, Length, Multiple of 4 or not
@@ -36,7 +41,7 @@ impl AodvMessage {
             (2, 20, 0) => Ok(Rrep(RREP::new(b)?)),
             (3, _, 0) => Ok(Rerr(RERR::new(b)?)),
             (4, 2, 2) => Ok(Ack),
-            (_, _, _) => Err(ParseError::new("Wrong length or type bit")),
+            (_, _, _) => Err(parse_error!("Wrong length or type bit")),
         }
     }
     /// Convert an aodv control message into its representation as a bitfield
@@ -103,12 +108,12 @@ pub struct RREQ {
 
 impl RREQ {
     /// Return a RREQ message from a byte slice
-    pub fn new(b: &[u8]) -> Result<RREQ, Error> {
+    pub fn new(b: &[u8]) -> Result<RREQ, io::Error> {
         if b.len() != 24 {
-            return Err(ParseError::new(format!("RREQ messages are 24 bytes, not {}", b.len())));
+            return Err(parse_error!(format!("RREQ messages are 24 bytes, not {}", b.len())));
         }
         if b[0] != 1 {
-            return Err(ParseError::new("This is not a RREQ message"));
+            return Err(parse_error!("This is not a RREQ message"));
         }
         Ok(RREQ {
             j: 1 << 7 & b[1] != 0,
@@ -195,12 +200,12 @@ pub struct RREP {
 
 impl RREP {
     /// Return a RREP message from a byte slice
-    pub fn new(b: &[u8]) -> Result<RREP, Error> {
+    pub fn new(b: &[u8]) -> Result<RREP, io::Error> {
         if b.len() != 20 {
-            return Err(ParseError::new(format!("RREP messages are 20 bytes, not {}",b.len())));
+            return Err(parse_error!(format!("RREP messages are 20 bytes, not {}",b.len())));
         }
         if b[0] != 2 {
-            return Err(ParseError::new("This is not a RREP message"));
+            return Err(parse_error!("This is not a RREP message"));
         }
         Ok(RREP {
             r: 1 << 7 & b[1] != 0,
@@ -268,12 +273,12 @@ pub struct RERR {
 
 impl RERR {
     /// Return a RERR message from a byte slice
-    pub fn new(b: &[u8]) -> Result<RERR, Error> {
+    pub fn new(b: &[u8]) -> Result<RERR, io::Error> {
         if (b.len()-4) % 8 != 0 || b.len() <12 {
-            return Err(ParseError::new("This is not the right size for a RERR message"));
+            return Err(parse_error!("This is not the right size for a RERR message"));
         }
         if b[0] != 3{
-            return Err(ParseError::new("This message is not a RERR message"));
+            return Err(parse_error!("This message is not a RERR message"));
         }
 
         let mut udest_list = Vec::new();

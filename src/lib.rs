@@ -1,6 +1,9 @@
-use std::net::{Ipv4Addr, SocketAddr};
+extern crate byteorder;
 
+use std::net::{Ipv4Addr, SocketAddr};
 use std::io::{self, Error};
+
+use byteorder::{BigEndian, ByteOrder};
 
 pub mod config;
 mod util;
@@ -62,6 +65,7 @@ impl AodvMessage {
     }
 }
 
+///```text
 ///RREQ Message Format:
 ///0                   1                   2                   3
 ///0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -78,6 +82,7 @@ impl AodvMessage {
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///|                  Originator Sequence Number                   |
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///```
 #[derive(Debug, PartialEq)]
 pub struct RREQ {
     pub j: bool, // Join flag
@@ -112,11 +117,11 @@ impl RREQ {
             d: 1 << 4 & b[1] != 0,
             u: 1 << 3 & b[1] != 0,
             hop_count: b[3],
-            rreq_id: u32::from_be_bytes(&b[4..8]),
+            rreq_id: BigEndian::read_u32(&b[4..8]),
             dest_ip: Ipv4Addr::new(b[8], b[9], b[10], b[11]),
-            dest_seq_num: u32::from_be_bytes(&b[12..16]),
+            dest_seq_num: BigEndian::read_u32(&b[12..16]),
             orig_ip: Ipv4Addr::new(b[16], b[17], b[18], b[19]),
-            orig_seq_num: u32::from_be_bytes(&b[20..24]),
+            orig_seq_num: BigEndian::read_u32(&b[20..24]),
         })
     }
     /// Return the bit field representation of a RREQ message
@@ -124,21 +129,30 @@ impl RREQ {
         let mut b = Vec::with_capacity(24);
         b.push(1);
         b.push(
+            // TODO use bitflags or 0b01000000 notation
             if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
             if self.g { 1 << 5 } else { 0 } + if self.d { 1 << 4 } else { 0 } +
             if self.u { 1 << 3 } else { 0 },
-            );
+        );
         b.push(0); // Reserved space
 
         b.push(self.hop_count);
 
-        b.extend(self.rreq_id.as_be_bytes().iter());
+        // Buffer for writing big endian stuff
+        let mut buf = [0; 4];
+
+        BigEndian::write_u32(&mut buf, self.rreq_id);
+        b.extend(buf.iter());
 
         b.extend(self.dest_ip.octets().iter());
-        b.extend(self.dest_seq_num.as_be_bytes().iter());
+
+        BigEndian::write_u32(&mut buf, self.dest_seq_num);
+        b.extend(buf.iter());
 
         b.extend(self.orig_ip.octets().iter());
-        b.extend(self.orig_seq_num.as_be_bytes().iter());
+
+        BigEndian::write_u32(&mut buf, self.orig_seq_num);
+        b.extend(buf.iter());
 
         b
     }
@@ -147,6 +161,7 @@ impl RREQ {
     }
 }
 
+///```text
 ///RREP Message Format:
 ///0                   1                   2                   3
 ///0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -161,6 +176,7 @@ impl RREQ {
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///|                           Lifetime                            |
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///```
 #[derive(Clone, Debug, PartialEq)]
 pub struct RREP {
     pub r: bool, // Repair flag
@@ -192,26 +208,30 @@ impl RREP {
             prefix_size: b[2] % 32,
             hop_count: b[3],
             dest_ip: Ipv4Addr::new(b[4], b[5], b[6], b[7]),
-            dest_seq_num: u32::from_be_bytes(&b[8..12]),
+            dest_seq_num: BigEndian::read_u32(&b[8..12]),
             orig_ip: Ipv4Addr::new(b[12], b[13], b[14], b[15]),
-            lifetime: u32::from_be_bytes(&b[16..20]),
+            lifetime: BigEndian::read_u32(&b[16..20]),
         })
     }
     /// Return the bit field representation of a RREP message
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(20);
         b.push(2);
-        b.push(
-            if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 },
-            );
-        // TODO: fix this value!
+        b.push( if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 } );
         b.push(self.prefix_size % 32);
         b.push(self.hop_count);
 
         b.extend(self.dest_ip.octets().iter());
-        b.extend(self.dest_seq_num.as_be_bytes().iter());
+
+        let mut buf = [0; 4];
+
+        BigEndian::write_u32(&mut buf, self.dest_seq_num);
+        b.extend(buf.iter());
+
         b.extend(self.orig_ip.octets().iter());
-        b.extend(self.lifetime.as_be_bytes().iter());
+
+        BigEndian::write_u32(&mut buf, self.lifetime);
+        b.extend(buf.iter());
 
         b
     }
@@ -220,6 +240,7 @@ impl RREP {
     }
 }
 
+///```text
 ///RERR Message Format:
 ///0                   1                   2                   3
 ///0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -234,6 +255,7 @@ impl RREP {
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///|Additional Unreachable Destination Sequence Numbers (if needed)|
 ///+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///```
 #[derive(Clone, Debug, PartialEq)]
 pub struct RERR {
     pub n: bool, // No delete flag
@@ -258,14 +280,14 @@ impl RERR {
         let mut i = 4;
         while i < b.len(){
             udest_list.push((Ipv4Addr::new(b[i],b[i+1],b[i+2],b[i+3]),
-            u32::from_be_bytes(&b[i+4..i+8])));
+            BigEndian::read_u32(&b[i+4..i+8])));
             i+=8;
         }
 
         Ok(RERR{
             n: 1<<7&b[1]!=0,
             dest_count: udest_list.len() as u8,
-            udest_list: udest_list,
+            udest_list
         })
     }
     /// Return the bit field representation of a RERR message
@@ -276,15 +298,14 @@ impl RERR {
         b.push(0);
         b.push(self.dest_count);
 
+        let mut buf = [0; 4];
         for i in 0..self.udest_list.len() as usize{
             // Add each ip address
-            for bit in &self.udest_list[i].0.octets() {
-                b.push(*bit);
-            }
+            b.extend(self.udest_list[i].0.octets().iter());
+
             // Add its sequence number
-            for bit in &self.udest_list[i].1.as_be_bytes() {
-                b.push(*bit)
-            }
+            BigEndian::write_u32(&mut buf, self.udest_list[i].1);
+            b.extend(buf.iter());
         }
         b
     }

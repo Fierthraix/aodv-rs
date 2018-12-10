@@ -1,13 +1,13 @@
-extern crate bytes;
 extern crate byteorder;
+extern crate bytes;
 extern crate tokio_io;
 
-use std::net::{Ipv4Addr, SocketAddr};
 use std::io;
+use std::net::{Ipv4Addr, SocketAddr};
 
-use bytes::{Bytes, BufMut, BytesMut};
 use byteorder::{BigEndian, ByteOrder};
-use tokio_io::codec::{Encoder, Decoder};
+use bytes::{BufMut, Bytes, BytesMut};
+use tokio_io::codec::{Decoder, Encoder};
 
 pub mod config;
 pub mod server;
@@ -125,7 +125,7 @@ pub struct RREQ {
     pub u: bool, // Unknown Sequence number
 
     pub hop_count: u8, // 8-bit Hop Count
-    pub rreq_id: u32, // 32-bit RREQ ID
+    pub rreq_id: u32,  // 32-bit RREQ ID
 
     pub dest_ip: Ipv4Addr, // Destination IP Address
     pub dest_seq_num: u32, // Destination Sequence Number
@@ -138,7 +138,10 @@ impl RREQ {
     /// Return a RREQ message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREQ, io::Error> {
         if b.len() != 24 {
-            return Err(parse_error!(format!("RREQ messages are 24 bytes, not {}", b.len())));
+            return Err(parse_error!(format!(
+                "RREQ messages are 24 bytes, not {}",
+                b.len()
+            )));
         }
         if b[0] != 1 {
             return Err(parse_error!("This is not a RREQ message"));
@@ -163,9 +166,11 @@ impl RREQ {
         b.push(1);
         b.push(
             // TODO use bitflags or 0b01000000 notation
-            if self.j { 1 << 7 } else { 0 } + if self.r { 1 << 6 } else { 0 } +
-            if self.g { 1 << 5 } else { 0 } + if self.d { 1 << 4 } else { 0 } +
-            if self.u { 1 << 3 } else { 0 },
+            if self.j { 1 << 7 } else { 0 }
+                + if self.r { 1 << 6 } else { 0 }
+                + if self.g { 1 << 5 } else { 0 }
+                + if self.d { 1 << 4 } else { 0 }
+                + if self.u { 1 << 3 } else { 0 },
         );
         b.push(0); // Reserved space
 
@@ -216,7 +221,7 @@ pub struct RREP {
     pub a: bool, // Acknowledgment required flag
 
     pub prefix_size: u8, // 5-bit prefix size
-    pub hop_count: u8, // 8-bit Hop Count
+    pub hop_count: u8,   // 8-bit Hop Count
 
     pub dest_ip: Ipv4Addr, //Destination IP
     pub dest_seq_num: u32, //Destination Sequence Number
@@ -230,7 +235,10 @@ impl RREP {
     /// Return a RREP message from a byte slice
     pub fn new(b: &[u8]) -> Result<RREP, io::Error> {
         if b.len() != 20 {
-            return Err(parse_error!(format!("RREP messages are 20 bytes, not {}",b.len())));
+            return Err(parse_error!(format!(
+                "RREP messages are 20 bytes, not {}",
+                b.len()
+            )));
         }
         if b[0] != 2 {
             return Err(parse_error!("This is not a RREP message"));
@@ -250,7 +258,7 @@ impl RREP {
     pub fn bit_message(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(20);
         b.push(2);
-        b.push( if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 } );
+        b.push(if self.r { 1 << 7 } else { 0 } + if self.a { 1 << 6 } else { 0 });
         b.push(self.prefix_size % 32);
         b.push(self.hop_count);
 
@@ -295,44 +303,50 @@ pub struct RERR {
 
     pub dest_count: u8, // 8-bit Destination Count
 
-    pub udest_list: Vec<(Ipv4Addr, // Unreachable Destination IP Address
-                         u32)>, // Unreachable Destination Sequence Number
+    pub udest_list: Vec<(
+        Ipv4Addr, // Unreachable Destination IP Address
+        u32,
+    )>, // Unreachable Destination Sequence Number
 }
 
 impl RERR {
     /// Return a RERR message from a byte slice
     pub fn new(b: &[u8]) -> Result<RERR, io::Error> {
-        if (b.len()-4) % 8 != 0 || b.len() <12 {
-            return Err(parse_error!("This is not the right size for a RERR message"));
+        if (b.len() - 4) % 8 != 0 || b.len() < 12 {
+            return Err(parse_error!(
+                "This is not the right size for a RERR message"
+            ));
         }
-        if b[0] != 3{
+        if b[0] != 3 {
             return Err(parse_error!("This message is not a RERR message"));
         }
 
         let mut udest_list = Vec::new();
         let mut i = 4;
-        while i < b.len(){
-            udest_list.push((Ipv4Addr::new(b[i],b[i+1],b[i+2],b[i+3]),
-            BigEndian::read_u32(&b[i+4..i+8])));
-            i+=8;
+        while i < b.len() {
+            udest_list.push((
+                Ipv4Addr::new(b[i], b[i + 1], b[i + 2], b[i + 3]),
+                BigEndian::read_u32(&b[i + 4..i + 8]),
+            ));
+            i += 8;
         }
 
-        Ok(RERR{
-            n: 1<<7&b[1]!=0,
+        Ok(RERR {
+            n: 1 << 7 & b[1] != 0,
             dest_count: udest_list.len() as u8,
-            udest_list
+            udest_list,
         })
     }
     /// Return the bit field representation of a RERR message
     pub fn bit_message(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(4+8*self.dest_count as usize);
+        let mut b = Vec::with_capacity(4 + 8 * self.dest_count as usize);
         b.push(3);
-        b.push(if self.n {1<<7} else {0});
+        b.push(if self.n { 1 << 7 } else { 0 });
         b.push(0);
         b.push(self.dest_count);
 
         let mut buf = [0; 4];
-        for i in 0..self.udest_list.len() as usize{
+        for i in 0..self.udest_list.len() as usize {
             // Add each ip address
             b.extend(self.udest_list[i].0.octets().iter());
 
@@ -342,7 +356,7 @@ impl RERR {
         }
         b
     }
-    pub fn handle_message(&mut self, addr: &SocketAddr){
+    pub fn handle_message(&mut self, addr: &SocketAddr) {
         unimplemented!();
     }
 }
@@ -368,9 +382,9 @@ mod test_encoding {
         };
 
         let bytes: &[u8] = &[
-                1, 168, 0, 144, 0, 0, 56, 89, 192, 168, 10, 
-                14, 0, 0, 0, 12, 192, 168, 10, 19, 0, 0, 0, 63,
-            ];
+            1, 168, 0, 144, 0, 0, 56, 89, 192, 168, 10, 14, 0, 0, 0, 12, 192, 168, 10, 19, 0, 0, 0,
+            63,
+        ];
         assert_eq!(bytes.to_vec(), rreq.bit_message());
         assert_eq!(rreq, RREQ::new(bytes).unwrap())
     }
@@ -389,8 +403,8 @@ mod test_encoding {
         };
 
         let bytes: &[u8] = &[
-                2, 128, 31, 98, 192, 168, 10, 14, 0, 0, 0, 12, 192, 168, 10, 19, 0, 0, 127, 91,
-            ];
+            2, 128, 31, 98, 192, 168, 10, 14, 0, 0, 0, 12, 192, 168, 10, 19, 0, 0, 127, 91,
+        ];
 
         assert_eq!(bytes.to_vec(), rrep.bit_message());
         assert_eq!(rrep, RREP::new(bytes).unwrap())
@@ -399,32 +413,31 @@ mod test_encoding {
     #[test]
     fn test_rerr_encoding() {
         let mut udest_list = Vec::with_capacity(3);
-        udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
-        udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
+        udest_list.push((Ipv4Addr::new(192, 168, 10, 18), 482755));
+        udest_list.push((Ipv4Addr::new(255, 255, 255, 255), 0));
         let rerr = RERR {
             n: false,
             dest_count: 2,
             udest_list: udest_list,
         };
         let bytes: &[u8] = &[
-            3, 0, 0, 2, 192, 168, 10, 18, 0, 7,
-            93, 195, 255, 255, 255, 255, 0, 0, 0, 0
+            3, 0, 0, 2, 192, 168, 10, 18, 0, 7, 93, 195, 255, 255, 255, 255, 0, 0, 0, 0,
         ];
         assert_eq!(bytes, rerr.bit_message().as_slice());
         assert_eq!(rerr, RERR::new(bytes).unwrap());
 
         let mut udest_list = Vec::with_capacity(3);
-        udest_list.push((Ipv4Addr::new(192,168,10,18), 482755));
-        udest_list.push((Ipv4Addr::new(255,255,255,255), 0));
-        udest_list.push((Ipv4Addr::new(192,168,10,15), 58392910));
+        udest_list.push((Ipv4Addr::new(192, 168, 10, 18), 482755));
+        udest_list.push((Ipv4Addr::new(255, 255, 255, 255), 0));
+        udest_list.push((Ipv4Addr::new(192, 168, 10, 15), 58392910));
         let rerr = RERR {
             n: false,
             dest_count: 3,
             udest_list: udest_list,
         };
         let bytes: &[u8] = &[
-            3, 0, 0, 3, 192, 168, 10, 18, 0, 7,
-            93, 195, 255, 255, 255, 255, 0, 0, 0, 0, 192, 168, 10, 15, 3, 123, 1, 78
+            3, 0, 0, 3, 192, 168, 10, 18, 0, 7, 93, 195, 255, 255, 255, 255, 0, 0, 0, 0, 192, 168,
+            10, 15, 3, 123, 1, 78,
         ];
 
         assert_eq!(bytes, rerr.bit_message().as_slice());

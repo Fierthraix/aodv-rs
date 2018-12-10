@@ -1,13 +1,13 @@
+extern crate futures;
 extern crate tokio;
 extern crate tokio_io;
-extern crate futures;
 
 use std::net::SocketAddr;
 
-use self::tokio::executor::current_thread;
-use self::tokio::net::{UdpSocket, UdpFramed};
-use self::futures::stream::Stream;
 use self::futures::future;
+use self::futures::stream::Stream;
+use self::tokio::executor::current_thread;
+use self::tokio::net::{UdpFramed, UdpSocket};
 
 use super::{AodvCodec, AODV_PORT};
 

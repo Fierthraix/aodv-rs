@@ -1,14 +1,14 @@
-extern crate clap;
 extern crate chrono;
+extern crate clap;
 extern crate yaml_rust;
 
-use self::clap::{Arg, App, ArgMatches};
-use self::yaml_rust::YamlLoader;
 use self::chrono::Duration;
+use self::clap::{App, Arg, ArgMatches};
+use self::yaml_rust::YamlLoader;
 
 use std::fs::File;
-use std::io::BufReader;
 use std::io::prelude::*;
+use std::io::BufReader;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -86,68 +86,68 @@ impl Config {
         let doc = &yaml_file[0];
 
         // Replace appropriate arguments
-        doc["Interface"].as_str().map(|x| {
-            self.interface = String::from(x)
-        });
+        doc["Interface"]
+            .as_str()
+            .map(|x| self.interface = String::from(x));
         doc["BroadcastAddress"].as_str().map(|x| {
             if Ipv4Addr::from_str(x).is_ok() {
                 self.broadcast_address = Ipv4Addr::from_str(x).unwrap();
             }
         });
         doc["Port"].as_i64().map(|x| self.port = x as u16);
-        doc["ACTIVE_ROUTE_TIMEOUT"].as_i64().map(|x| {
-            self.ACTIVE_ROUTE_TIMEOUT = Duration::milliseconds(x)
-        });
-        doc["ALLOWED_HELLO_LOSS"].as_i64().map(|x| {
-            self.ALLOWED_HELLO_LOSS = x as u32
-        });
-        doc["HELLO_INTERVAL"].as_i64().map(|x| {
-            self.HELLO_INTERVAL = Duration::milliseconds(x)
-        });
-        doc["LOCAL_ADD_TTL"].as_i64().map(|x| {
-            self.LOCAL_ADD_TTL = x as usize
-        });
-        doc["NET_DIAMETER"].as_i64().map(|x| {
-            self.NET_DIAMETER = x as usize
-        });
-        doc["NODE_TRAVERSAL_TIME"].as_i64().map(|x| {
-            self.NODE_TRAVERSAL_TIME = Duration::milliseconds(x)
-        });
-        doc["RERR_RATELIMIT"].as_i64().map(|x| {
-            self.RERR_RATELIMIT = x as usize
-        });
-        doc["RREQ_RETRIES"].as_i64().map(|x| {
-            self.RREQ_RETRIES = x as usize
-        });
-        doc["RREQ_RATELIMIT"].as_i64().map(|x| {
-            self.RREQ_RATELIMIT = x as usize
-        });
-        doc["TIMEOUT_BUFFER"].as_i64().map(|x| {
-            self.TIMEOUT_BUFFER = x as usize
-        });
-        doc["TTL_START"].as_i64().map(
-            |x| self.TTL_START = x as usize,
-        );
-        doc["TTL_INCREMENT"].as_i64().map(|x| {
-            self.TTL_INCREMENT = x as usize
-        });
-        doc["TTL_THRESHOLD"].as_i64().map(|x| {
-            self.TTL_THRESHOLD = x as usize
-        });
+        doc["ACTIVE_ROUTE_TIMEOUT"]
+            .as_i64()
+            .map(|x| self.ACTIVE_ROUTE_TIMEOUT = Duration::milliseconds(x));
+        doc["ALLOWED_HELLO_LOSS"]
+            .as_i64()
+            .map(|x| self.ALLOWED_HELLO_LOSS = x as u32);
+        doc["HELLO_INTERVAL"]
+            .as_i64()
+            .map(|x| self.HELLO_INTERVAL = Duration::milliseconds(x));
+        doc["LOCAL_ADD_TTL"]
+            .as_i64()
+            .map(|x| self.LOCAL_ADD_TTL = x as usize);
+        doc["NET_DIAMETER"]
+            .as_i64()
+            .map(|x| self.NET_DIAMETER = x as usize);
+        doc["NODE_TRAVERSAL_TIME"]
+            .as_i64()
+            .map(|x| self.NODE_TRAVERSAL_TIME = Duration::milliseconds(x));
+        doc["RERR_RATELIMIT"]
+            .as_i64()
+            .map(|x| self.RERR_RATELIMIT = x as usize);
+        doc["RREQ_RETRIES"]
+            .as_i64()
+            .map(|x| self.RREQ_RETRIES = x as usize);
+        doc["RREQ_RATELIMIT"]
+            .as_i64()
+            .map(|x| self.RREQ_RATELIMIT = x as usize);
+        doc["TIMEOUT_BUFFER"]
+            .as_i64()
+            .map(|x| self.TIMEOUT_BUFFER = x as usize);
+        doc["TTL_START"]
+            .as_i64()
+            .map(|x| self.TTL_START = x as usize);
+        doc["TTL_INCREMENT"]
+            .as_i64()
+            .map(|x| self.TTL_INCREMENT = x as usize);
+        doc["TTL_THRESHOLD"]
+            .as_i64()
+            .map(|x| self.TTL_THRESHOLD = x as usize);
 
         self.compute_values();
     }
     /// Change values passed in via command line flags
     fn read_args(&mut self, args: &ArgMatches) {
-        args.value_of("current_ip").map(|x| if let Ok(ip) =
-            Ipv4Addr::from_str(x)
-        {
-            self.current_ip = ip
+        args.value_of("current_ip").map(|x| {
+            if let Ok(ip) = Ipv4Addr::from_str(x) {
+                self.current_ip = ip
+            }
         });
-        args.value_of("port").map(|x| if let Ok(port) =
-            x.parse::<u16>()
-        {
-            self.port = port
+        args.value_of("port").map(|x| {
+            if let Ok(port) = x.parse::<u16>() {
+                self.port = port
+            }
         });
     }
     /// Compute config values dependent on user set ones
@@ -166,8 +166,8 @@ impl Config {
         self.BLACKLIST_TIMEOUT = self.NET_TRAVERSAL_TIME * self.RREQ_RETRIES as i32;
         self.NEXT_HOP_WAIT = self.NODE_TRAVERSAL_TIME + Duration::milliseconds(10);
         self.PATH_DISCOVERY_TIME = self.NET_TRAVERSAL_TIME * 2;
-        self.RING_TRAVERSAL_TIME = self.NODE_TRAVERSAL_TIME *
-            (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as i32;
+        self.RING_TRAVERSAL_TIME =
+            self.NODE_TRAVERSAL_TIME * (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as i32;
     }
 }
 
@@ -211,9 +211,7 @@ impl Default for Config {
 pub fn get_args() -> ArgMatches<'static> {
     let matches = App::new("aodv")
         .version("0.0.1")
-        .about(
-            "Implements the AODV routing protocol as defined in RFC 3561",
-        )
+        .about("Implements the AODV routing protocol as defined in RFC 3561")
         .arg(
             Arg::with_name("port")
                 .short("p")
@@ -222,9 +220,12 @@ pub fn get_args() -> ArgMatches<'static> {
                 .help("The port to run the tcp server on.")
                 .takes_value(true),
         )
-        .arg(Arg::with_name("start_aodv").short("s").long("start").help(
-            "Start the aodv daemon",
-        ))
+        .arg(
+            Arg::with_name("start_aodv")
+                .short("s")
+                .long("start")
+                .help("Start the aodv daemon"),
+        )
         .arg(
             Arg::with_name("current_ip")
                 .long("ip")
@@ -253,7 +254,6 @@ pub fn get_args() -> ArgMatches<'static> {
 
 #[test]
 fn test_parse_config() {
-
     let config = r#"Interface: "wlan1"
 BroadcastAddress: "192.168.10.251"
 Port: 1201
@@ -273,7 +273,7 @@ TTL_THRESHOLD: 8
 "#;
 
     use std::env::temp_dir;
-    use std::fs::{File, remove_file};
+    use std::fs::{remove_file, File};
 
     // Save modified config file to tmp file
 

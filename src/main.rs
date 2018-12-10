@@ -13,7 +13,6 @@ fn main() {
 
     // Start server
     if args.is_present("start_aodv") {
-
         // Check user is root
         match var("USER") {
             Ok(s) => {
@@ -27,7 +26,6 @@ fn main() {
 
         // Start internal server
         server::aodv();
-
     } else {
         println!("{}", args.usage());
     }

@@ -6,5 +6,5 @@ macro_rules! parse_error {
     };
     () => {
         parse_error!("")
-    }
+    };
 }

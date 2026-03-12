@@ -15,6 +15,15 @@ pub struct IncomingPacket {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Send(SendAction),
+    ForwardBufferedPackets {
+        destination: Ipv4Addr,
+        next_hop: Ipv4Addr,
+        packets: Vec<BufferedPacket>,
+    },
+    DropBufferedPackets {
+        destination: Ipv4Addr,
+        packets: Vec<BufferedPacket>,
+    },
     RouteDiscovered {
         destination: Ipv4Addr,
         next_hop: Ipv4Addr,
@@ -25,6 +34,13 @@ pub enum Action {
         next_hop: Ipv4Addr,
     },
     RouteDiscoveryFailed {
+        destination: Ipv4Addr,
+    },
+    LocalRepairStarted {
+        destination: Ipv4Addr,
+        ttl: u8,
+    },
+    LocalRepairFailed {
         destination: Ipv4Addr,
     },
 }
@@ -49,6 +65,12 @@ pub enum RouteState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferedPacket {
+    pub id: u64,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteEntry {
     pub destination: Ipv4Addr,
     pub sequence_number: u32,
@@ -59,6 +81,7 @@ pub struct RouteEntry {
     pub precursors: BTreeSet<Ipv4Addr>,
     pub lifetime: Instant,
     pub created_by_hello: bool,
+    pub repairing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +92,7 @@ pub struct Engine {
     routes: HashMap<Ipv4Addr, RouteEntry>,
     seen_rreqs: HashMap<(Ipv4Addr, u32), Instant>,
     pending_discoveries: HashMap<Ipv4Addr, PendingDiscovery>,
+    buffered_packets: HashMap<Ipv4Addr, VecDeque<BufferedPacket>>,
     neighbors: HashMap<Ipv4Addr, NeighborState>,
     recent_rreq_emissions: VecDeque<Instant>,
     recent_rerr_emissions: VecDeque<Instant>,
@@ -80,6 +104,13 @@ struct PendingDiscovery {
     last_ttl: u8,
     retries_at_net_diameter: usize,
     deadline: Instant,
+    kind: PendingKind,
+}
+
+#[derive(Debug, Clone)]
+enum PendingKind {
+    Discovery,
+    LocalRepair { previous_hop_count: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +128,7 @@ impl Engine {
             routes: HashMap::new(),
             seen_rreqs: HashMap::new(),
             pending_discoveries: HashMap::new(),
+            buffered_packets: HashMap::new(),
             neighbors: HashMap::new(),
             recent_rreq_emissions: VecDeque::new(),
             recent_rerr_emissions: VecDeque::new(),
@@ -112,15 +144,25 @@ impl Engine {
         self.routes.get(&destination)
     }
 
+    pub fn buffered_packet_count(&self, destination: Ipv4Addr) -> usize {
+        self.buffered_packets
+            .get(&destination)
+            .map_or(0, VecDeque::len)
+    }
+
     pub fn start_route_discovery(&mut self, destination: Ipv4Addr, now: Instant) -> Vec<Action> {
         self.prune_caches(now);
         if self.has_active_route(destination, now) {
             let route = self.routes.get(&destination).unwrap();
-            return vec![Action::RouteDiscovered {
+            let mut actions = vec![Action::RouteDiscovered {
                 destination,
                 next_hop: route.next_hop,
                 hop_count: route.hop_count,
             }];
+            if let Some(action) = self.flush_buffered_packets(destination) {
+                actions.push(action);
+            }
+            return actions;
         }
 
         let ttl = self.initial_ttl_for(destination);
@@ -137,10 +179,65 @@ impl Engine {
                 last_ttl: ttl,
                 retries_at_net_diameter: usize::from(ttl >= self.config.net_diameter),
                 deadline: now + wait_duration,
+                kind: PendingKind::Discovery,
             },
         );
 
         self.send_rreq(message, ttl, now).into_iter().collect()
+    }
+
+    pub fn submit_data_packet(
+        &mut self,
+        destination: Ipv4Addr,
+        packet: BufferedPacket,
+        now: Instant,
+    ) -> Vec<Action> {
+        self.prune_caches(now);
+        if self.has_active_route(destination, now) {
+            let route = self.routes.get(&destination).unwrap();
+            return vec![Action::ForwardBufferedPackets {
+                destination,
+                next_hop: route.next_hop,
+                packets: vec![packet],
+            }];
+        }
+
+        self.buffer_packet(destination, packet);
+
+        if self.pending_discoveries.contains_key(&destination) {
+            return Vec::new();
+        }
+
+        self.start_route_discovery(destination, now)
+    }
+
+    pub fn handle_forwarding_failure(
+        &mut self,
+        destination: Ipv4Addr,
+        next_hop: Ipv4Addr,
+        packet: Option<BufferedPacket>,
+        now: Instant,
+    ) -> Vec<Action> {
+        self.prune_caches(now);
+        if let Some(packet) = packet {
+            self.buffer_packet(destination, packet);
+        }
+
+        let can_repair = self.routes.get(&destination).is_some_and(|route| {
+            route.state == RouteState::Valid
+                && route.next_hop == next_hop
+                && route.hop_count <= self.config.max_repair_ttl()
+        });
+
+        if can_repair {
+            return self.start_local_repair(destination, now);
+        }
+
+        let mut actions = self.invalidate_destination(destination, next_hop, now, false);
+        if let Some(action) = self.drop_buffered_packets(destination) {
+            actions.push(action);
+        }
+        actions
     }
 
     pub fn handle_incoming(&mut self, packet: IncomingPacket, now: Instant) -> Vec<Action> {
@@ -195,6 +292,7 @@ impl Engine {
         for destination in expiring {
             if let Some(route) = self.routes.get_mut(&destination) {
                 route.state = RouteState::Invalid;
+                route.repairing = false;
                 route.lifetime = now + self.config.delete_period();
                 actions.push(Action::RouteInvalidated {
                     destination,
@@ -207,14 +305,22 @@ impl Engine {
             *destination == self.config.local_ip || route.lifetime > now
         });
 
-        let timed_out_discoveries: Vec<Ipv4Addr> = self
-            .pending_discoveries
-            .iter()
-            .filter_map(|(destination, pending)| (pending.deadline <= now).then_some(*destination))
-            .collect();
+        loop {
+            let timed_out_discoveries: Vec<Ipv4Addr> = self
+                .pending_discoveries
+                .iter()
+                .filter_map(|(destination, pending)| {
+                    (pending.deadline <= now).then_some(*destination)
+                })
+                .collect();
 
-        for destination in timed_out_discoveries {
-            actions.extend(self.retry_route_discovery(destination, now));
+            if timed_out_discoveries.is_empty() {
+                break;
+            }
+
+            for destination in timed_out_discoveries {
+                actions.extend(self.retry_route_discovery(destination, now));
+            }
         }
 
         if self.should_emit_hello(now) {
@@ -306,7 +412,7 @@ impl Engine {
         });
 
         if message.destination_ip == self.config.local_ip {
-            return self.reply_as_destination(&message, now);
+            return self.reply_as_destination(&message);
         }
 
         if let Some(actions) = self.reply_as_intermediate(source, &message, now) {
@@ -331,7 +437,7 @@ impl Engine {
         vec![self.broadcast_action(Message::Rreq(message), inbound_ttl.saturating_sub(1), now)]
     }
 
-    fn reply_as_destination(&mut self, message: &Rreq, _now: Instant) -> Vec<Action> {
+    fn reply_as_destination(&mut self, message: &Rreq) -> Vec<Action> {
         self.local_sequence_number = self
             .local_sequence_number
             .max(message.destination_sequence_number);
@@ -457,13 +563,29 @@ impl Engine {
         }
 
         if message.originator_ip == self.config.local_ip {
-            self.pending_discoveries.remove(&message.destination_ip);
+            let pending = self.pending_discoveries.remove(&message.destination_ip);
             let route = self.routes.get(&message.destination_ip).unwrap();
-            return vec![Action::RouteDiscovered {
+            let mut actions = Vec::new();
+
+            if let Some(PendingDiscovery {
+                kind: PendingKind::LocalRepair { previous_hop_count },
+                ..
+            }) = pending
+            {
+                if route.hop_count > previous_hop_count {
+                    actions.extend(self.build_repaired_route_notice(message.destination_ip));
+                }
+            }
+
+            actions.push(Action::RouteDiscovered {
                 destination: message.destination_ip,
                 next_hop: route.next_hop,
                 hop_count: route.hop_count,
-            }];
+            });
+            if let Some(action) = self.flush_buffered_packets(message.destination_ip) {
+                actions.push(action);
+            }
+            return actions;
         }
 
         let reverse_route = match self.routes.get_mut(&message.originator_ip) {
@@ -531,6 +653,7 @@ impl Engine {
             route.sequence_number = unreachable.destination_sequence_number;
             route.sequence_number_valid = true;
             route.state = RouteState::Invalid;
+            route.repairing = false;
             route.lifetime = now + self.config.delete_period();
             precursors.extend(route.precursors.iter().copied());
             affected.push(unreachable.clone());
@@ -556,6 +679,21 @@ impl Engine {
             return Vec::new();
         };
 
+        if matches!(pending.kind, PendingKind::LocalRepair { .. }) {
+            self.pending_discoveries.remove(&destination);
+            let next_hop = self
+                .routes
+                .get(&destination)
+                .map(|route| route.next_hop)
+                .unwrap_or(Ipv4Addr::UNSPECIFIED);
+            let mut actions = self.invalidate_destination(destination, next_hop, now, false);
+            actions.push(Action::LocalRepairFailed { destination });
+            if let Some(action) = self.drop_buffered_packets(destination) {
+                actions.push(action);
+            }
+            return actions;
+        }
+
         let (next_ttl, retries_at_net_diameter) = if pending.last_ttl < self.config.ttl_threshold {
             let incremented = pending.last_ttl.saturating_add(self.config.ttl_increment);
             if incremented >= self.config.ttl_threshold {
@@ -570,7 +708,11 @@ impl Engine {
             )
         } else {
             self.pending_discoveries.remove(&destination);
-            return vec![Action::RouteDiscoveryFailed { destination }];
+            let mut actions = vec![Action::RouteDiscoveryFailed { destination }];
+            if let Some(action) = self.drop_buffered_packets(destination) {
+                actions.push(action);
+            }
+            return actions;
         };
 
         let wait_duration = self.discovery_wait_duration(next_ttl, retries_at_net_diameter);
@@ -580,6 +722,7 @@ impl Engine {
                 last_ttl: next_ttl,
                 retries_at_net_diameter,
                 deadline: now + wait_duration,
+                kind: PendingKind::Discovery,
             },
         );
 
@@ -607,6 +750,7 @@ impl Engine {
             }
             route.sequence_number_valid = true;
             route.state = RouteState::Invalid;
+            route.repairing = false;
             route.lifetime = now + self.config.delete_period();
             precursors.extend(route.precursors.iter().copied());
             unreachable.push(UnreachableDestination {
@@ -649,6 +793,7 @@ impl Engine {
                 existing.hop_count = update.hop_count;
                 existing.lifetime = existing.lifetime.max(update.lifetime);
                 existing.created_by_hello = update.created_by_hello;
+                existing.repairing = false;
                 true
             }
             None => {
@@ -664,6 +809,7 @@ impl Engine {
                         precursors: BTreeSet::new(),
                         lifetime: update.lifetime,
                         created_by_hello: update.created_by_hello,
+                        repairing: false,
                     },
                 );
                 true
@@ -704,6 +850,26 @@ impl Engine {
             rreq_id: self.next_rreq_id,
             destination_ip: destination,
             destination_sequence_number: sequence_number,
+            originator_ip: self.config.local_ip,
+            originator_sequence_number: self.local_sequence_number,
+        }
+    }
+
+    fn build_local_repair_rreq(&mut self, destination: Ipv4Addr) -> Rreq {
+        self.local_sequence_number = self.local_sequence_number.wrapping_add(1);
+        self.next_rreq_id = self.next_rreq_id.wrapping_add(1);
+        let route = self.routes.get(&destination).expect("repair route missing");
+
+        Rreq {
+            join: false,
+            repair: true,
+            gratuitous_rrep: false,
+            destination_only: false,
+            unknown_sequence_number: !route.sequence_number_valid,
+            hop_count: 0,
+            rreq_id: self.next_rreq_id,
+            destination_ip: destination,
+            destination_sequence_number: route.sequence_number,
             originator_ip: self.config.local_ip,
             originator_sequence_number: self.local_sequence_number,
         }
@@ -813,6 +979,166 @@ impl Engine {
                 last_heard: now,
                 hello_timeout,
             });
+    }
+
+    fn buffer_packet(&mut self, destination: Ipv4Addr, packet: BufferedPacket) {
+        self.buffered_packets
+            .entry(destination)
+            .or_default()
+            .push_back(packet);
+    }
+
+    fn flush_buffered_packets(&mut self, destination: Ipv4Addr) -> Option<Action> {
+        let packets = self
+            .buffered_packets
+            .remove(&destination)?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if packets.is_empty() {
+            return None;
+        }
+        let route = self.routes.get(&destination)?;
+        Some(Action::ForwardBufferedPackets {
+            destination,
+            next_hop: route.next_hop,
+            packets,
+        })
+    }
+
+    fn drop_buffered_packets(&mut self, destination: Ipv4Addr) -> Option<Action> {
+        let packets = self
+            .buffered_packets
+            .remove(&destination)?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if packets.is_empty() {
+            return None;
+        }
+        Some(Action::DropBufferedPackets {
+            destination,
+            packets,
+        })
+    }
+
+    fn start_local_repair(&mut self, destination: Ipv4Addr, now: Instant) -> Vec<Action> {
+        if self.pending_discoveries.contains_key(&destination) {
+            return Vec::new();
+        }
+
+        let (previous_hop_count, next_hop, ttl) = {
+            let route = self
+                .routes
+                .get_mut(&destination)
+                .expect("repair route missing");
+            let previous_hop_count = route.hop_count;
+            if route.sequence_number_valid {
+                route.sequence_number = route.sequence_number.wrapping_add(1);
+            } else {
+                route.sequence_number_valid = true;
+            }
+            route.state = RouteState::Invalid;
+            route.repairing = true;
+            route.lifetime = now + self.config.delete_period();
+            (
+                previous_hop_count,
+                route.next_hop,
+                route.hop_count.saturating_add(self.config.local_add_ttl),
+            )
+        };
+
+        let rreq = self.build_local_repair_rreq(destination);
+        self.seen_rreqs.insert(
+            (self.config.local_ip, self.next_rreq_id),
+            now + self.config.path_discovery_time(),
+        );
+        self.pending_discoveries.insert(
+            destination,
+            PendingDiscovery {
+                last_ttl: ttl,
+                retries_at_net_diameter: 0,
+                deadline: now + self.config.path_discovery_time(),
+                kind: PendingKind::LocalRepair { previous_hop_count },
+            },
+        );
+
+        let mut actions = vec![
+            Action::RouteInvalidated {
+                destination,
+                next_hop,
+            },
+            Action::LocalRepairStarted { destination, ttl },
+        ];
+        if let Some(action) = self.send_rreq(rreq, ttl, now) {
+            actions.push(action);
+        }
+        actions
+    }
+
+    fn build_repaired_route_notice(&self, destination: Ipv4Addr) -> Vec<Action> {
+        let Some(route) = self.routes.get(&destination) else {
+            return Vec::new();
+        };
+        if route.precursors.is_empty() {
+            return Vec::new();
+        }
+
+        vec![self.rerr_send_action(
+            route.precursors.iter().next().copied(),
+            route.precursors.len(),
+            Message::Rerr(Rerr {
+                no_delete: true,
+                unreachable_destinations: vec![UnreachableDestination {
+                    destination_ip: destination,
+                    destination_sequence_number: route.sequence_number,
+                }],
+            }),
+        )]
+    }
+
+    fn invalidate_destination(
+        &mut self,
+        destination: Ipv4Addr,
+        next_hop: Ipv4Addr,
+        now: Instant,
+        no_delete: bool,
+    ) -> Vec<Action> {
+        let Some(route) = self.routes.get_mut(&destination) else {
+            return Vec::new();
+        };
+        if next_hop != Ipv4Addr::UNSPECIFIED && route.next_hop != next_hop {
+            return Vec::new();
+        }
+
+        if route.sequence_number_valid {
+            route.sequence_number = route.sequence_number.wrapping_add(1);
+        }
+        route.sequence_number_valid = true;
+        route.state = RouteState::Invalid;
+        route.repairing = false;
+        route.lifetime = now + self.config.delete_period();
+        let route_next_hop = route.next_hop;
+        let sequence_number = route.sequence_number;
+        let single_precursor = route.precursors.iter().next().copied();
+        let precursor_count = route.precursors.len();
+
+        let mut actions = vec![Action::RouteInvalidated {
+            destination,
+            next_hop: route_next_hop,
+        }];
+        if precursor_count > 0 && self.allow_rerr(now) {
+            actions.push(self.rerr_send_action(
+                single_precursor,
+                precursor_count,
+                Message::Rerr(Rerr {
+                    no_delete,
+                    unreachable_destinations: vec![UnreachableDestination {
+                        destination_ip: destination,
+                        destination_sequence_number: sequence_number,
+                    }],
+                }),
+            ));
+        }
+        actions
     }
 
     fn has_active_route(&self, destination: Ipv4Addr, now: Instant) -> bool {
@@ -1138,6 +1464,7 @@ mod tests {
                 precursors: BTreeSet::from([precursor]),
                 lifetime: now + Duration::from_secs(5),
                 created_by_hello: false,
+                repairing: false,
             },
         );
 
@@ -1155,5 +1482,308 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action, Action::Send(_)))
         );
+    }
+
+    #[test]
+    fn submit_data_packet_buffers_until_route_is_discovered() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let source = Ipv4Addr::new(10, 0, 0, 2);
+        let destination = Ipv4Addr::new(10, 0, 0, 99);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        let actions = engine.submit_data_packet(
+            destination,
+            BufferedPacket {
+                id: 1,
+                payload: vec![1, 2, 3],
+            },
+            now,
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::Send(_)))
+        );
+        assert_eq!(engine.buffered_packet_count(destination), 1);
+
+        let actions = engine.handle_incoming(
+            IncomingPacket {
+                source,
+                ttl: Some(4),
+                message: Message::Rrep(Rrep {
+                    repair: false,
+                    acknowledgement_required: false,
+                    prefix_size: 0,
+                    hop_count: 0,
+                    destination_ip: destination,
+                    destination_sequence_number: 5,
+                    originator_ip: local_ip,
+                    lifetime_ms: 5_000,
+                    hello_interval_ms: None,
+                }),
+            },
+            now + Duration::from_millis(10),
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::ForwardBufferedPackets {
+                destination: d,
+                next_hop,
+                packets
+            } if *d == destination && *next_hop == source && packets.len() == 1 && packets[0].id == 1
+        )));
+        assert_eq!(engine.buffered_packet_count(destination), 0);
+    }
+
+    #[test]
+    fn buffered_packets_are_dropped_after_discovery_failure() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 99);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.submit_data_packet(
+            destination,
+            BufferedPacket {
+                id: 7,
+                payload: vec![9],
+            },
+            now,
+        );
+        let mut actions = Vec::new();
+        let mut current = now;
+        for _ in 0..8 {
+            let deadline = engine
+                .next_deadline(current)
+                .unwrap_or(current + Duration::from_secs(30));
+            current = deadline + Duration::from_millis(1);
+            actions = engine.tick(current);
+            if actions
+                .iter()
+                .any(|action| matches!(action, Action::DropBufferedPackets { .. }))
+            {
+                break;
+            }
+        }
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::DropBufferedPackets {
+                destination: d,
+                packets
+            } if *d == destination && packets.len() == 1 && packets[0].id == 7
+        )));
+    }
+
+    #[test]
+    fn forwarding_failure_starts_local_repair_and_buffers_packet() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 9);
+        let next_hop = Ipv4Addr::new(10, 0, 0, 2);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.update_route(RouteUpdate {
+            destination,
+            next_hop,
+            sequence_number: Some(4),
+            sequence_number_valid: true,
+            hop_count: 2,
+            lifetime: now + Duration::from_secs(10),
+            state: RouteState::Valid,
+            created_by_hello: false,
+        });
+
+        let actions = engine.handle_forwarding_failure(
+            destination,
+            next_hop,
+            Some(BufferedPacket {
+                id: 5,
+                payload: vec![1],
+            }),
+            now,
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::LocalRepairStarted {
+                destination: d,
+                ttl: 4
+            } if *d == destination
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Send(SendAction {
+                message: Message::Rreq(rreq),
+                ..
+            }) if rreq.repair && rreq.destination_ip == destination
+        )));
+        assert_eq!(engine.buffered_packet_count(destination), 1);
+        assert!(engine.route(destination).unwrap().repairing);
+    }
+
+    #[test]
+    fn successful_local_repair_flushes_buffered_packets() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 9);
+        let old_next_hop = Ipv4Addr::new(10, 0, 0, 2);
+        let new_next_hop = Ipv4Addr::new(10, 0, 0, 3);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.update_route(RouteUpdate {
+            destination,
+            next_hop: old_next_hop,
+            sequence_number: Some(4),
+            sequence_number_valid: true,
+            hop_count: 2,
+            lifetime: now + Duration::from_secs(10),
+            state: RouteState::Valid,
+            created_by_hello: false,
+        });
+
+        engine.handle_forwarding_failure(
+            destination,
+            old_next_hop,
+            Some(BufferedPacket {
+                id: 6,
+                payload: vec![2],
+            }),
+            now,
+        );
+
+        let actions = engine.handle_incoming(
+            IncomingPacket {
+                source: new_next_hop,
+                ttl: Some(4),
+                message: Message::Rrep(Rrep {
+                    repair: false,
+                    acknowledgement_required: false,
+                    prefix_size: 0,
+                    hop_count: 1,
+                    destination_ip: destination,
+                    destination_sequence_number: 7,
+                    originator_ip: local_ip,
+                    lifetime_ms: 5_000,
+                    hello_interval_ms: None,
+                }),
+            },
+            now + Duration::from_millis(10),
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::ForwardBufferedPackets {
+                destination: d,
+                next_hop,
+                packets
+            } if *d == destination && *next_hop == new_next_hop && packets.len() == 1 && packets[0].id == 6
+        )));
+        assert_eq!(engine.buffered_packet_count(destination), 0);
+        assert_eq!(engine.route(destination).unwrap().state, RouteState::Valid);
+        assert!(!engine.route(destination).unwrap().repairing);
+    }
+
+    #[test]
+    fn failed_local_repair_drops_buffered_packets() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 9);
+        let next_hop = Ipv4Addr::new(10, 0, 0, 2);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.update_route(RouteUpdate {
+            destination,
+            next_hop,
+            sequence_number: Some(4),
+            sequence_number_valid: true,
+            hop_count: 2,
+            lifetime: now + Duration::from_secs(10),
+            state: RouteState::Valid,
+            created_by_hello: false,
+        });
+
+        engine.handle_forwarding_failure(
+            destination,
+            next_hop,
+            Some(BufferedPacket {
+                id: 11,
+                payload: vec![3],
+            }),
+            now,
+        );
+
+        let actions =
+            engine.tick(now + engine.config().path_discovery_time() + Duration::from_millis(1));
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::LocalRepairFailed { destination: d } if *d == destination
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::DropBufferedPackets {
+                destination: d,
+                packets
+            } if *d == destination && packets.len() == 1 && packets[0].id == 11
+        )));
+        assert_eq!(engine.buffered_packet_count(destination), 0);
+    }
+
+    #[test]
+    fn longer_repaired_route_triggers_no_delete_rerr() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 9);
+        let old_next_hop = Ipv4Addr::new(10, 0, 0, 2);
+        let new_next_hop = Ipv4Addr::new(10, 0, 0, 3);
+        let precursor = Ipv4Addr::new(10, 0, 0, 4);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.routes.insert(
+            destination,
+            RouteEntry {
+                destination,
+                sequence_number: 4,
+                sequence_number_valid: true,
+                state: RouteState::Valid,
+                hop_count: 2,
+                next_hop: old_next_hop,
+                precursors: BTreeSet::from([precursor]),
+                lifetime: now + Duration::from_secs(10),
+                created_by_hello: false,
+                repairing: false,
+            },
+        );
+
+        engine.handle_forwarding_failure(destination, old_next_hop, None, now);
+        let actions = engine.handle_incoming(
+            IncomingPacket {
+                source: new_next_hop,
+                ttl: Some(4),
+                message: Message::Rrep(Rrep {
+                    repair: false,
+                    acknowledgement_required: false,
+                    prefix_size: 0,
+                    hop_count: 4,
+                    destination_ip: destination,
+                    destination_sequence_number: 8,
+                    originator_ip: local_ip,
+                    lifetime_ms: 5_000,
+                    hello_interval_ms: None,
+                }),
+            },
+            now + Duration::from_millis(10),
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Send(SendAction {
+                message: Message::Rerr(rerr),
+                ..
+            }) if rerr.no_delete
+        )));
     }
 }

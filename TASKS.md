@@ -14,4 +14,4 @@
 - [x] Add a second-layer real-socket integration harness that exercises multiple nodes over UDP.
 - [x] Expand routing test coverage with many topology, failure, retry, and timer scenarios.
 - [x] Add and verify a static build target for the daemon, including the intended target triple and build instructions.
-- [ ] Add stricter RFC coverage for local repair and buffered data packets.
+- [x] Add stricter RFC coverage for local repair and buffered data packets.

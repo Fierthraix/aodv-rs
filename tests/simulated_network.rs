@@ -123,7 +123,11 @@ impl SimNetwork {
         let next_tick = self
             .nodes
             .iter()
-            .filter_map(|(ip, node)| node.engine.next_deadline(self.now).map(|deadline| (*ip, deadline)))
+            .filter_map(|(ip, node)| {
+                node.engine
+                    .next_deadline(self.now)
+                    .map(|deadline| (*ip, deadline))
+            })
             .filter(|(_, deadline)| *deadline <= limit)
             .min_by_key(|(_, deadline)| *deadline);
 
@@ -165,7 +169,11 @@ impl SimNetwork {
         let next_tick = self
             .nodes
             .iter()
-            .filter_map(|(ip, node)| node.engine.next_deadline(self.now).map(|deadline| (*ip, deadline)))
+            .filter_map(|(ip, node)| {
+                node.engine
+                    .next_deadline(self.now)
+                    .map(|deadline| (*ip, deadline))
+            })
             .find(|(_, deadline)| *deadline <= self.now);
         if let Some((ip, deadline)) = next_tick {
             self.process_tick(ip, deadline);
@@ -180,7 +188,11 @@ impl SimNetwork {
             let due = self
                 .nodes
                 .iter()
-                .filter_map(|(ip, node)| node.engine.next_deadline(self.now).map(|deadline| (*ip, deadline)))
+                .filter_map(|(ip, node)| {
+                    node.engine
+                        .next_deadline(self.now)
+                        .map(|deadline| (*ip, deadline))
+                })
                 .find(|(_, deadline)| *deadline <= self.now);
             let Some((ip, deadline)) = due else {
                 break;
@@ -249,7 +261,9 @@ impl SimNetwork {
     }
 
     fn is_linked(&self, a: Ipv4Addr, b: Ipv4Addr) -> bool {
-        self.links.get(&a).is_some_and(|neighbors| neighbors.contains(&b))
+        self.links
+            .get(&a)
+            .is_some_and(|neighbors| neighbors.contains(&b))
     }
 }
 
@@ -436,9 +450,7 @@ fn expanding_ring_search_increases_ttl_across_retries() {
         .action_log
         .iter()
         .filter_map(|(node, action)| match action {
-            Action::Send(send)
-                if *node == ip(1) && matches!(send.message, Message::Rreq(_)) =>
-            {
+            Action::Send(send) if *node == ip(1) && matches!(send.message, Message::Rreq(_)) => {
                 Some(send.ttl)
             }
             _ => None,

@@ -65,12 +65,22 @@ impl UdpMesh {
     }
 
     async fn start_discovery(&mut self, from: Ipv4Addr, destination: Ipv4Addr) -> io::Result<()> {
-        let actions = self.nodes.get_mut(&from).unwrap().engine.start_route_discovery(destination, self.now);
+        let actions = self
+            .nodes
+            .get_mut(&from)
+            .unwrap()
+            .engine
+            .start_route_discovery(destination, self.now);
         self.apply_actions(from, actions).await
     }
 
     async fn handle_link_loss(&mut self, node: Ipv4Addr, next_hop: Ipv4Addr) -> io::Result<()> {
-        let actions = self.nodes.get_mut(&node).unwrap().engine.handle_link_loss(next_hop, self.now);
+        let actions = self
+            .nodes
+            .get_mut(&node)
+            .unwrap()
+            .engine
+            .handle_link_loss(next_hop, self.now);
         self.apply_actions(node, actions).await
     }
 
@@ -79,7 +89,8 @@ impl UdpMesh {
             let mut progressed = false;
 
             for ip in self.nodes.keys().copied().collect::<Vec<_>>() {
-                if let Some(deadline) = self.nodes.get(&ip).unwrap().engine.next_deadline(self.now) {
+                if let Some(deadline) = self.nodes.get(&ip).unwrap().engine.next_deadline(self.now)
+                {
                     if deadline <= self.now {
                         let actions = self.nodes.get_mut(&ip).unwrap().engine.tick(self.now);
                         self.apply_actions(ip, actions).await?;
@@ -165,13 +176,22 @@ impl UdpMesh {
 
         match send.target {
             SendTarget::Broadcast => {
-                for neighbor in self.links.get(&from).into_iter().flat_map(|set| set.iter().copied()) {
+                for neighbor in self
+                    .links
+                    .get(&from)
+                    .into_iter()
+                    .flat_map(|set| set.iter().copied())
+                {
                     let destination = self.nodes.get(&neighbor).unwrap().socket.local_addr()?;
                     sender.send_to(bytes.as_ref(), destination).await?;
                 }
             }
             SendTarget::Unicast(target) => {
-                if self.links.get(&from).is_some_and(|set| set.contains(&target)) {
+                if self
+                    .links
+                    .get(&from)
+                    .is_some_and(|set| set.contains(&target))
+                {
                     let destination = self.nodes.get(&target).unwrap().socket.local_addr()?;
                     sender.send_to(bytes.as_ref(), destination).await?;
                 }

@@ -180,6 +180,24 @@ async fn execute_actions(
     for action in actions {
         match action {
             Action::Send(send) => send_action(socket, config, &send).await?,
+            Action::ForwardBufferedPackets {
+                destination,
+                next_hop,
+                packets,
+            } => info!(
+                %destination,
+                %next_hop,
+                count = packets.len(),
+                "buffered packets ready to forward"
+            ),
+            Action::DropBufferedPackets {
+                destination,
+                packets,
+            } => warn!(
+                %destination,
+                count = packets.len(),
+                "dropping buffered packets"
+            ),
             Action::RouteDiscovered {
                 destination,
                 next_hop,
@@ -193,6 +211,12 @@ async fn execute_actions(
             }
             Action::RouteDiscoveryFailed { destination } => {
                 warn!(%destination, "route discovery failed");
+            }
+            Action::LocalRepairStarted { destination, ttl } => {
+                info!(%destination, ttl, "local repair started");
+            }
+            Action::LocalRepairFailed { destination } => {
+                warn!(%destination, "local repair failed");
             }
         }
     }

@@ -67,5 +67,6 @@ Modernize this repository from its years-old Rust starter code into a working AO
 
 ## Known Limitations
 
-- Local repair and buffered data-packet handling are not yet implemented.
+- Local repair is implemented, but the repair TTL currently uses the existing route hop count plus `LOCAL_ADD_TTL` as a userspace approximation rather than deriving sender-distance from a real forwarding path.
+- Buffered data-packet handling is implemented inside the protocol engine, but the daemon currently logs flush/drop actions instead of owning a full end-to-end payload queue and reinjection path.
 - Kernel routing-table integration is still out of scope for this repository version.

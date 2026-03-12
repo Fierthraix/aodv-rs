@@ -90,12 +90,11 @@ impl UdpMesh {
 
             for ip in self.nodes.keys().copied().collect::<Vec<_>>() {
                 if let Some(deadline) = self.nodes.get(&ip).unwrap().engine.next_deadline(self.now)
+                    && deadline <= self.now
                 {
-                    if deadline <= self.now {
-                        let actions = self.nodes.get_mut(&ip).unwrap().engine.tick(self.now);
-                        self.apply_actions(ip, actions).await?;
-                        progressed = true;
-                    }
+                    let actions = self.nodes.get_mut(&ip).unwrap().engine.tick(self.now);
+                    self.apply_actions(ip, actions).await?;
+                    progressed = true;
                 }
             }
 

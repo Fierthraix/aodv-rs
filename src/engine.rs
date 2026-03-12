@@ -425,13 +425,12 @@ impl Engine {
         }
 
         message.hop_count = new_hop_count;
-        if let Some(route) = self.routes.get(&message.destination_ip) {
-            if route.sequence_number_valid
-                && seq_ge(route.sequence_number, message.destination_sequence_number)
-            {
-                message.destination_sequence_number = route.sequence_number;
-                message.unknown_sequence_number = false;
-            }
+        if let Some(route) = self.routes.get(&message.destination_ip)
+            && route.sequence_number_valid
+            && seq_ge(route.sequence_number, message.destination_sequence_number)
+        {
+            message.destination_sequence_number = route.sequence_number;
+            message.unknown_sequence_number = false;
         }
 
         vec![self.broadcast_action(Message::Rreq(message), inbound_ttl.saturating_sub(1), now)]
@@ -571,10 +570,9 @@ impl Engine {
                 kind: PendingKind::LocalRepair { previous_hop_count },
                 ..
             }) = pending
+                && route.hop_count > previous_hop_count
             {
-                if route.hop_count > previous_hop_count {
-                    actions.extend(self.build_repaired_route_notice(message.destination_ip));
-                }
+                actions.extend(self.build_repaired_route_notice(message.destination_ip));
             }
 
             actions.push(Action::RouteDiscovered {

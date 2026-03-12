@@ -69,11 +69,11 @@ impl Message {
         match message_type {
             1 if bytes.len() == 24 => Ok(Self::Rreq(Rreq::decode(bytes))),
             2 if bytes.len() >= 20 => Ok(Self::Rrep(Rrep::decode(bytes)?)),
-            3 if bytes.len() >= 12 && (bytes.len() - 4) % 8 == 0 => {
+            3 if bytes.len() >= 12 && (bytes.len() - 4).is_multiple_of(8) => {
                 Ok(Self::Rerr(Rerr::decode(bytes)))
             }
             4 if bytes.len() == 2 => Ok(Self::RrepAck),
-            1 | 2 | 3 | 4 => Err(MessageError::InvalidLength {
+            1..=4 => Err(MessageError::InvalidLength {
                 message_type,
                 length: bytes.len(),
             }),

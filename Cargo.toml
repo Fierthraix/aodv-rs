@@ -1,19 +1,21 @@
 [package]
 name = "aodv"
 version = "0.1.0"
-authors = ["Lucas Rooyakkers <lucas.rooyakkers@drdc.rddc.gc.ca>"]
+edition = "2024"
+description = "Userspace AODV control-plane implementation based on RFC 3561"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
-chrono = "0.4"
-time = "0.1"
-futures = "0.1"
-bytes = "0.4"
-tokio = "0.1"
-tokio-io = "0.1"
-tokio-timer = "0.1"
-yaml-rust = "0.3"
-log = "0.3"
-rayon = "1.0"
-clap = "2.31"
-lazy_static = "0.2"
-byteorder = "1.2"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+socket2 = "0.6"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tempfile = "3"

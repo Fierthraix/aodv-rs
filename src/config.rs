@@ -1,330 +1,375 @@
-extern crate chrono;
-extern crate clap;
-extern crate yaml_rust;
-
-use self::chrono::Duration;
-use self::clap::{App, Arg, ArgMatches};
-use self::yaml_rust::YamlLoader;
-
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
+use std::fs;
 use std::net::Ipv4Addr;
-use std::str::FromStr;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-/// The object that holds both user-set variables and aodv constants
-#[allow(non_snake_case)]
-#[derive(Debug, PartialEq)]
+use clap::Parser;
+use serde::Deserialize;
+use thiserror::Error;
+
+use crate::AODV_PORT;
+
+#[derive(Debug, Clone, Parser)]
+#[command(name = "aodv", about = "AODV daemon implementing RFC 3561")]
+pub struct CliArgs {
+    #[arg(short, long)]
+    pub config: Option<PathBuf>,
+
+    #[arg(long)]
+    pub local_ip: Option<Ipv4Addr>,
+
+    #[arg(long)]
+    pub bind_ip: Option<Ipv4Addr>,
+
+    #[arg(long)]
+    pub broadcast_ip: Option<Ipv4Addr>,
+
+    #[arg(short, long)]
+    pub port: Option<u16>,
+
+    #[arg(long)]
+    pub interface: Option<String>,
+
+    #[arg(long)]
+    pub disable_hello: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    pub current_ip: Ipv4Addr,
-    pub interface: String,
-    pub broadcast_address: Ipv4Addr,
+    pub local_ip: Ipv4Addr,
+    pub bind_ip: Ipv4Addr,
+    pub broadcast_ip: Ipv4Addr,
     pub port: u16,
+    pub interface: Option<String>,
+    pub enable_hello: bool,
+    pub active_route_timeout: Duration,
+    pub allowed_hello_loss: u32,
+    pub hello_interval: Duration,
+    pub local_add_ttl: u8,
+    pub net_diameter: u8,
+    pub node_traversal_time: Duration,
+    pub rerr_ratelimit: usize,
+    pub rreq_retries: usize,
+    pub rreq_ratelimit: usize,
+    pub timeout_buffer: u8,
+    pub ttl_start: u8,
+    pub ttl_increment: u8,
+    pub ttl_threshold: u8,
+}
 
-    pub ACTIVE_ROUTE_TIMEOUT: Duration,
-    pub ALLOWED_HELLO_LOSS: u32,
-    pub BLACKLIST_TIMEOUT: Duration,
-    pub DELETE_PERIOD: Duration,
-    pub HELLO_INTERVAL: Duration,
-    pub LOCAL_ADD_TTL: usize,
-    pub MAX_REPAIR_TTL: f64,
-    pub MIN_REPAIR_TTL: usize,
-    pub MY_ROUTE_TIMEOUT: Duration,
-    pub NET_DIAMETER: usize,
-    pub NET_TRAVERSAL_TIME: Duration,
-    pub NEXT_HOP_WAIT: Duration,
-    pub NODE_TRAVERSAL_TIME: Duration,
-    pub PATH_DISCOVERY_TIME: Duration,
-    pub RERR_RATELIMIT: usize,
-    pub RING_TRAVERSAL_TIME: Duration,
-    pub RREQ_RETRIES: usize,
-    pub RREQ_RATELIMIT: usize,
-    pub TIMEOUT_BUFFER: usize,
-    pub TTL_START: usize,
-    pub TTL_INCREMENT: usize,
-    pub TTL_THRESHOLD: usize,
-    pub TTL_VALUE: usize,
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("failed to read config file {path}: {source}")]
+    ReadConfig {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse config file {path}: {source}")]
+    ParseConfig {
+        path: String,
+        #[source]
+        source: serde_yaml::Error,
+    },
 }
 
 impl Config {
-    /// Get the global config using both a .yaml file and the command line input
-    pub fn new(args: &ArgMatches) -> Self {
-        // Load the default config
-        let mut config = Config::default();
+    pub fn from_cli() -> Result<Self, ConfigError> {
+        Self::from_args(CliArgs::parse())
+    }
 
-        // Change elements from a config file if supplied
-        //TODO: add a check for a config file in XDG_CONFIG_DIR
-        if let Some(file) = args.value_of("config_file") {
-            config.read_config(File::open(file).unwrap());
+    pub fn from_args(args: CliArgs) -> Result<Self, ConfigError> {
+        let mut config = Self::default();
+
+        if let Some(path) = args.config.as_deref() {
+            let file_config = FileConfig::from_path(path)?;
+            config.apply_file_config(file_config);
         }
 
-        // Change any arguments from stdin
-        config.read_args(args);
-
-        config
-    }
-    /// Change any options read in from the given config file
-    fn read_config(&mut self, file: File) {
-        // Read file into string with buffered reader
-        let mut buf_reader = BufReader::new(file);
-        let mut contents = String::new();
-        if buf_reader.read_to_string(&mut contents).is_err() {
-            //TODO: log.Println("Unable to read config file, using default!")
-            return;
-        };
-
-        // Read string file into Yaml file
-        let yaml_file;
-        match YamlLoader::load_from_str(&contents) {
-            Ok(y) => yaml_file = y,
-            Err(_) => {
-                //TODO: log.Println("Unable to parse yaml, using default")
-                return;
-            }
+        if let Some(local_ip) = args.local_ip {
+            config.local_ip = local_ip;
         }
-        // First doc (there is multi-document support)
-        let doc = &yaml_file[0];
-
-        // Replace appropriate arguments
-        doc["Interface"]
-            .as_str()
-            .map(|x| self.interface = String::from(x));
-        doc["BroadcastAddress"].as_str().map(|x| {
-            if Ipv4Addr::from_str(x).is_ok() {
-                self.broadcast_address = Ipv4Addr::from_str(x).unwrap();
-            }
-        });
-        doc["Port"].as_i64().map(|x| self.port = x as u16);
-        doc["ACTIVE_ROUTE_TIMEOUT"]
-            .as_i64()
-            .map(|x| self.ACTIVE_ROUTE_TIMEOUT = Duration::milliseconds(x));
-        doc["ALLOWED_HELLO_LOSS"]
-            .as_i64()
-            .map(|x| self.ALLOWED_HELLO_LOSS = x as u32);
-        doc["HELLO_INTERVAL"]
-            .as_i64()
-            .map(|x| self.HELLO_INTERVAL = Duration::milliseconds(x));
-        doc["LOCAL_ADD_TTL"]
-            .as_i64()
-            .map(|x| self.LOCAL_ADD_TTL = x as usize);
-        doc["NET_DIAMETER"]
-            .as_i64()
-            .map(|x| self.NET_DIAMETER = x as usize);
-        doc["NODE_TRAVERSAL_TIME"]
-            .as_i64()
-            .map(|x| self.NODE_TRAVERSAL_TIME = Duration::milliseconds(x));
-        doc["RERR_RATELIMIT"]
-            .as_i64()
-            .map(|x| self.RERR_RATELIMIT = x as usize);
-        doc["RREQ_RETRIES"]
-            .as_i64()
-            .map(|x| self.RREQ_RETRIES = x as usize);
-        doc["RREQ_RATELIMIT"]
-            .as_i64()
-            .map(|x| self.RREQ_RATELIMIT = x as usize);
-        doc["TIMEOUT_BUFFER"]
-            .as_i64()
-            .map(|x| self.TIMEOUT_BUFFER = x as usize);
-        doc["TTL_START"]
-            .as_i64()
-            .map(|x| self.TTL_START = x as usize);
-        doc["TTL_INCREMENT"]
-            .as_i64()
-            .map(|x| self.TTL_INCREMENT = x as usize);
-        doc["TTL_THRESHOLD"]
-            .as_i64()
-            .map(|x| self.TTL_THRESHOLD = x as usize);
-
-        self.compute_values();
-    }
-    /// Change values passed in via command line flags
-    fn read_args(&mut self, args: &ArgMatches) {
-        args.value_of("current_ip").map(|x| {
-            if let Ok(ip) = Ipv4Addr::from_str(x) {
-                self.current_ip = ip
-            }
-        });
-        args.value_of("port").map(|x| {
-            if let Ok(port) = x.parse::<u16>() {
-                self.port = port
-            }
-        });
-    }
-    /// Compute config values dependent on user set ones
-    fn compute_values(&mut self) {
-        // Arbitrary value; see Section 10.
-        let k = 5;
-
-        if self.ACTIVE_ROUTE_TIMEOUT > self.HELLO_INTERVAL {
-            self.DELETE_PERIOD = self.ACTIVE_ROUTE_TIMEOUT * k;
-        } else {
-            self.DELETE_PERIOD = self.HELLO_INTERVAL * k;
+        if let Some(bind_ip) = args.bind_ip {
+            config.bind_ip = bind_ip;
         }
-        self.MAX_REPAIR_TTL = 0.3 * self.NET_DIAMETER as f64;
-        self.MY_ROUTE_TIMEOUT = self.ACTIVE_ROUTE_TIMEOUT * 2;
-        self.NET_TRAVERSAL_TIME = self.NODE_TRAVERSAL_TIME * 2 * self.NET_DIAMETER as i32;
-        self.BLACKLIST_TIMEOUT = self.NET_TRAVERSAL_TIME * self.RREQ_RETRIES as i32;
-        self.NEXT_HOP_WAIT = self.NODE_TRAVERSAL_TIME + Duration::milliseconds(10);
-        self.PATH_DISCOVERY_TIME = self.NET_TRAVERSAL_TIME * 2;
-        self.RING_TRAVERSAL_TIME =
-            self.NODE_TRAVERSAL_TIME * (2 * (self.TTL_VALUE + self.TIMEOUT_BUFFER)) as i32;
+        if let Some(broadcast_ip) = args.broadcast_ip {
+            config.broadcast_ip = broadcast_ip;
+        }
+        if let Some(port) = args.port {
+            config.port = port;
+        }
+        if let Some(interface) = args.interface {
+            config.interface = Some(interface);
+        }
+        if args.disable_hello {
+            config.enable_hello = false;
+        }
+
+        if config.local_ip == Ipv4Addr::UNSPECIFIED {
+            config.local_ip = config.bind_ip;
+        }
+
+        Ok(config)
+    }
+
+    pub fn delete_period(&self) -> Duration {
+        duration_mul(self.active_route_timeout.max(self.hello_interval), 5)
+    }
+
+    pub fn max_repair_ttl(&self) -> u8 {
+        ((self.net_diameter as f32) * 0.3).ceil() as u8
+    }
+
+    pub fn my_route_timeout(&self) -> Duration {
+        duration_mul(self.active_route_timeout, 2)
+    }
+
+    pub fn net_traversal_time(&self) -> Duration {
+        duration_mul(self.node_traversal_time, 2 * self.net_diameter as u32)
+    }
+
+    pub fn next_hop_wait(&self) -> Duration {
+        self.node_traversal_time + Duration::from_millis(10)
+    }
+
+    pub fn path_discovery_time(&self) -> Duration {
+        duration_mul(self.net_traversal_time(), 2)
+    }
+
+    pub fn ring_traversal_time(&self, ttl_value: u8) -> Duration {
+        duration_mul(
+            self.node_traversal_time,
+            2 * (ttl_value as u32 + self.timeout_buffer as u32),
+        )
+    }
+
+    pub fn blacklist_timeout(&self) -> Duration {
+        duration_mul(self.net_traversal_time(), self.rreq_retries as u32)
+    }
+
+    pub fn hello_timeout(&self, advertised_interval_ms: Option<u32>) -> Duration {
+        let interval = advertised_interval_ms
+            .map(|ms| Duration::from_millis(ms as u64))
+            .unwrap_or(self.hello_interval);
+        duration_mul(interval, self.allowed_hello_loss)
+    }
+
+    pub fn aodv_port(&self) -> u16 {
+        self.port
+    }
+
+    fn apply_file_config(&mut self, file: FileConfig) {
+        if let Some(local_ip) = file.local_ip {
+            self.local_ip = local_ip;
+        }
+        if let Some(bind_ip) = file.bind_ip {
+            self.bind_ip = bind_ip;
+        }
+        if let Some(broadcast_ip) = file.broadcast_ip {
+            self.broadcast_ip = broadcast_ip;
+        }
+        if let Some(port) = file.port {
+            self.port = port;
+        }
+        if let Some(interface) = file.interface {
+            self.interface = Some(interface);
+        }
+        if let Some(enable_hello) = file.enable_hello {
+            self.enable_hello = enable_hello;
+        }
+        if let Some(value) = file.active_route_timeout_ms {
+            self.active_route_timeout = Duration::from_millis(value);
+        }
+        if let Some(value) = file.allowed_hello_loss {
+            self.allowed_hello_loss = value;
+        }
+        if let Some(value) = file.hello_interval_ms {
+            self.hello_interval = Duration::from_millis(value);
+        }
+        if let Some(value) = file.local_add_ttl {
+            self.local_add_ttl = value;
+        }
+        if let Some(value) = file.net_diameter {
+            self.net_diameter = value;
+        }
+        if let Some(value) = file.node_traversal_time_ms {
+            self.node_traversal_time = Duration::from_millis(value);
+        }
+        if let Some(value) = file.rerr_ratelimit {
+            self.rerr_ratelimit = value;
+        }
+        if let Some(value) = file.rreq_retries {
+            self.rreq_retries = value;
+        }
+        if let Some(value) = file.rreq_ratelimit {
+            self.rreq_ratelimit = value;
+        }
+        if let Some(value) = file.timeout_buffer {
+            self.timeout_buffer = value;
+        }
+        if let Some(value) = file.ttl_start {
+            self.ttl_start = value;
+        }
+        if let Some(value) = file.ttl_increment {
+            self.ttl_increment = value;
+        }
+        if let Some(value) = file.ttl_threshold {
+            self.ttl_threshold = value;
+        }
     }
 }
 
 impl Default for Config {
-    /// Return the default config as per section 10. of the RFC
     fn default() -> Self {
-        Config {
-            current_ip: Ipv4Addr::new(0, 0, 0, 0),
-            interface: "wlano".parse().unwrap(),
-            broadcast_address: Ipv4Addr::new(255, 255, 255, 255),
-            port: 1200,
-
-            ACTIVE_ROUTE_TIMEOUT: Duration::milliseconds(3000),
-            ALLOWED_HELLO_LOSS: 2,
-            BLACKLIST_TIMEOUT: Duration::milliseconds(5000),
-            DELETE_PERIOD: Duration::milliseconds(15_000),
-            HELLO_INTERVAL: Duration::milliseconds(1000),
-            LOCAL_ADD_TTL: 2,
-            MAX_REPAIR_TTL: 0.3 * 35.,
-            MIN_REPAIR_TTL: 0,
-            MY_ROUTE_TIMEOUT: Duration::milliseconds(6000),
-            NET_DIAMETER: 35,
-            NET_TRAVERSAL_TIME: Duration::milliseconds(2800),
-            NEXT_HOP_WAIT: Duration::milliseconds(50),
-            NODE_TRAVERSAL_TIME: Duration::milliseconds(40),
-            PATH_DISCOVERY_TIME: Duration::milliseconds(5600),
-            RERR_RATELIMIT: 10,
-            RING_TRAVERSAL_TIME: Duration::milliseconds(160),
-            RREQ_RETRIES: 2,
-            RREQ_RATELIMIT: 10,
-            TIMEOUT_BUFFER: 2,
-            TTL_START: 1,
-            TTL_INCREMENT: 2,
-            TTL_THRESHOLD: 7,
-            TTL_VALUE: 0,
+        Self {
+            local_ip: Ipv4Addr::UNSPECIFIED,
+            bind_ip: Ipv4Addr::UNSPECIFIED,
+            broadcast_ip: Ipv4Addr::new(255, 255, 255, 255),
+            port: AODV_PORT,
+            interface: None,
+            enable_hello: true,
+            active_route_timeout: Duration::from_millis(3_000),
+            allowed_hello_loss: 2,
+            hello_interval: Duration::from_millis(1_000),
+            local_add_ttl: 2,
+            net_diameter: 35,
+            node_traversal_time: Duration::from_millis(40),
+            rerr_ratelimit: 10,
+            rreq_retries: 2,
+            rreq_ratelimit: 10,
+            timeout_buffer: 2,
+            ttl_start: 1,
+            ttl_increment: 2,
+            ttl_threshold: 7,
         }
     }
 }
 
-///  Parse the command line arguments or print help/usage information
-pub fn get_args() -> ArgMatches<'static> {
-    let matches = App::new("aodv")
-        .version("0.0.1")
-        .about("Implements the AODV routing protocol as defined in RFC 3561")
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .long("port")
-                .value_name("PORT")
-                .help("The port to run the tcp server on.")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("start_aodv")
-                .short("s")
-                .long("start")
-                .help("Start the aodv daemon"),
-        )
-        .arg(
-            Arg::with_name("current_ip")
-                .long("ip")
-                .value_name("IP ADDRESS")
-                .help("The current IP address of the device")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("config_file")
-                .short("c")
-                .long("config")
-                .value_name("CONFIG FILE")
-                .help("Alternate config file")
-                .takes_value(true),
-        )
-        .get_matches();
-
-    // Validate submitted Ipv4Addr
-    if let Some(ip_str) = matches.value_of("current_ip") {
-        if let Err(e) = Ipv4Addr::from_str(ip_str) {
-            eprintln!("incorrectly formatted ip address: {}", e);
-        }
-    }
-    matches
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+    #[serde(default, alias = "current_ip", alias = "CurrentIp")]
+    local_ip: Option<Ipv4Addr>,
+    #[serde(default)]
+    bind_ip: Option<Ipv4Addr>,
+    #[serde(
+        default,
+        alias = "broadcast_address",
+        alias = "BroadcastAddress",
+        alias = "broadcastAddress"
+    )]
+    broadcast_ip: Option<Ipv4Addr>,
+    #[serde(default, alias = "Port")]
+    port: Option<u16>,
+    #[serde(default, alias = "Interface")]
+    interface: Option<String>,
+    #[serde(default)]
+    enable_hello: Option<bool>,
+    #[serde(default, alias = "ACTIVE_ROUTE_TIMEOUT")]
+    active_route_timeout_ms: Option<u64>,
+    #[serde(default, alias = "ALLOWED_HELLO_LOSS")]
+    allowed_hello_loss: Option<u32>,
+    #[serde(default, alias = "HELLO_INTERVAL")]
+    hello_interval_ms: Option<u64>,
+    #[serde(default, alias = "LOCAL_ADD_TTL")]
+    local_add_ttl: Option<u8>,
+    #[serde(default, alias = "NET_DIAMETER")]
+    net_diameter: Option<u8>,
+    #[serde(default, alias = "NODE_TRAVERSAL_TIME")]
+    node_traversal_time_ms: Option<u64>,
+    #[serde(default, alias = "RERR_RATELIMIT")]
+    rerr_ratelimit: Option<usize>,
+    #[serde(default, alias = "RREQ_RETRIES")]
+    rreq_retries: Option<usize>,
+    #[serde(default, alias = "RREQ_RATELIMIT")]
+    rreq_ratelimit: Option<usize>,
+    #[serde(default, alias = "TIMEOUT_BUFFER")]
+    timeout_buffer: Option<u8>,
+    #[serde(default, alias = "TTL_START")]
+    ttl_start: Option<u8>,
+    #[serde(default, alias = "TTL_INCREMENT")]
+    ttl_increment: Option<u8>,
+    #[serde(default, alias = "TTL_THRESHOLD")]
+    ttl_threshold: Option<u8>,
 }
 
-#[test]
-fn test_parse_config() {
-    let config = r#"Interface: "wlan1"
+impl FileConfig {
+    fn from_path(path: &Path) -> Result<Self, ConfigError> {
+        let display = path.display().to_string();
+        let contents = fs::read_to_string(path).map_err(|source| ConfigError::ReadConfig {
+            path: display.clone(),
+            source,
+        })?;
+        serde_yaml::from_str(&contents).map_err(|source| ConfigError::ParseConfig {
+            path: display,
+            source,
+        })
+    }
+}
+
+pub fn duration_mul(duration: Duration, factor: u32) -> Duration {
+    Duration::from_millis(duration.as_millis().saturating_mul(factor as u128) as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn parses_legacy_yaml_config() {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(
+            file.path(),
+            r#"Interface: "wlan1"
 BroadcastAddress: "192.168.10.251"
 Port: 1201
-ACTIVE_ROUTE_TIMEOUT: 3001 # milliseconds
+ACTIVE_ROUTE_TIMEOUT: 3001
 ALLOWED_HELLO_LOSS: 3
-HELLO_INTERVAL: 1001 # milliseconds
+HELLO_INTERVAL: 1001
 LOCAL_ADD_TTL: 3
 NET_DIAMETER: 36
-NODE_TRAVERSAL_TIME: 41 # milliseconds
-RERR_RATELIMIT: 11 # messages per second
+NODE_TRAVERSAL_TIME: 41
+RERR_RATELIMIT: 11
 RREQ_RETRIES: 3
-RREQ_RATELIMIT: 11 # messages per second
+RREQ_RATELIMIT: 11
 TIMEOUT_BUFFER: 3
 TTL_START: 2
 TTL_INCREMENT: 3
 TTL_THRESHOLD: 8
-"#;
+"#,
+        )
+        .unwrap();
 
-    use std::env::temp_dir;
-    use std::fs::{remove_file, File};
+        let args = CliArgs {
+            config: Some(file.path().to_path_buf()),
+            local_ip: None,
+            bind_ip: None,
+            broadcast_ip: None,
+            port: None,
+            interface: None,
+            disable_hello: false,
+        };
+        let config = Config::from_args(args).unwrap();
 
-    // Save modified config file to tmp file
-
-    let mut tmp = temp_dir();
-    tmp.push("config.yaml");
-
-    // Scope the creation of `c` to automatically close it
-    {
-        let mut c = File::create(&tmp).unwrap();
-        c.write_all(config.as_bytes()).unwrap();
+        assert_eq!(config.interface.as_deref(), Some("wlan1"));
+        assert_eq!(config.broadcast_ip, Ipv4Addr::new(192, 168, 10, 251));
+        assert_eq!(config.port, 1201);
+        assert_eq!(config.active_route_timeout, Duration::from_millis(3001));
+        assert_eq!(config.allowed_hello_loss, 3);
+        assert_eq!(config.hello_interval, Duration::from_millis(1001));
+        assert_eq!(config.local_add_ttl, 3);
+        assert_eq!(config.net_diameter, 36);
+        assert_eq!(config.node_traversal_time, Duration::from_millis(41));
+        assert_eq!(config.rerr_ratelimit, 11);
+        assert_eq!(config.rreq_retries, 3);
+        assert_eq!(config.rreq_ratelimit, 11);
+        assert_eq!(config.timeout_buffer, 3);
+        assert_eq!(config.ttl_start, 2);
+        assert_eq!(config.ttl_increment, 3);
+        assert_eq!(config.ttl_threshold, 8);
+        assert_eq!(config.delete_period(), Duration::from_millis(15_005));
+        assert_eq!(config.net_traversal_time(), Duration::from_millis(2_952));
+        assert_eq!(config.path_discovery_time(), Duration::from_millis(5_904));
+        assert_eq!(config.ring_traversal_time(0), Duration::from_millis(246));
     }
-
-    // Create default config
-    let mut config1 = Config::default();
-
-    // Change config1 based on the `.yaml` file
-    config1.read_config(File::open(&tmp).unwrap());
-
-    // Manually calculated chagnes
-    let config2 = Config {
-        interface: String::from("wlan1"),
-        broadcast_address: Ipv4Addr::new(192, 168, 10, 251),
-        current_ip: config1.current_ip,
-        port: 1201,
-        ACTIVE_ROUTE_TIMEOUT: Duration::milliseconds(3001),
-        ALLOWED_HELLO_LOSS: 3,
-        BLACKLIST_TIMEOUT: Duration::milliseconds(8856),
-        DELETE_PERIOD: Duration::milliseconds(15005),
-        HELLO_INTERVAL: Duration::milliseconds(1001),
-        LOCAL_ADD_TTL: 3,
-        MIN_REPAIR_TTL: 0,
-        MAX_REPAIR_TTL: config1.MAX_REPAIR_TTL, // Float, subject to error
-        MY_ROUTE_TIMEOUT: Duration::milliseconds(6002),
-        NET_DIAMETER: 36,
-        NET_TRAVERSAL_TIME: Duration::milliseconds(2952),
-        NEXT_HOP_WAIT: Duration::milliseconds(51),
-        NODE_TRAVERSAL_TIME: Duration::milliseconds(41),
-        PATH_DISCOVERY_TIME: Duration::milliseconds(5904),
-        RERR_RATELIMIT: 11,
-        RING_TRAVERSAL_TIME: Duration::milliseconds(246),
-        RREQ_RETRIES: 3,
-        RREQ_RATELIMIT: 11,
-        TIMEOUT_BUFFER: 3,
-        TTL_START: 2,
-        TTL_INCREMENT: 3,
-        TTL_THRESHOLD: 8,
-        TTL_VALUE: 0,
-    };
-
-    assert_eq!(config1, config2);
-
-    // Clean up tmp file
-    remove_file(tmp).unwrap();
 }

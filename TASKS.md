@@ -1,0 +1,17 @@
+- [x] Rewrite the crate layout and dependency baseline for Rust 2024 and modern async Rust.
+- [x] Replace the legacy CLI/config path with a typed modern configuration layer and daemon startup flow.
+- [x] Rebuild AODV message types and byte codec for RREQ, RREP, RERR, RREP-ACK, and hello handling.
+- [x] Implement shared protocol data structures: sequence-number helpers, route entries, precursor tracking, duplicate RREQ cache, and timer metadata.
+- [x] Implement route discovery origination and RFC-compliant RREQ processing.
+- [x] Implement RREP generation, forwarding, and forward-route installation.
+- [x] Implement RERR generation, route invalidation, and inbound RERR processing.
+- [x] Implement hello emission/reception and route expiry maintenance timers.
+- [x] Build the Tokio UDP daemon that drives the protocol engine over UDP port 654.
+- [x] Make the daemon usable on real Linux devices by binding a real UDP socket, supporting interface pinning, and receiving inbound TTL metadata.
+- [x] Add unit and integration tests covering packet codec, route discovery, reply forwarding, error handling, and timer behavior.
+- [x] Run formatting and the full test suite, then update this task list to match the final reality.
+- [x] Add an in-house deterministic multi-node simulation harness for the protocol engine.
+- [x] Add a second-layer real-socket integration harness that exercises multiple nodes over UDP.
+- [x] Expand routing test coverage with many topology, failure, retry, and timer scenarios.
+- [x] Add and verify a static build target for the daemon, including the intended target triple and build instructions.
+- [ ] Add stricter RFC coverage for local repair and buffered data packets.

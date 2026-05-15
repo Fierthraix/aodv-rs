@@ -1,15 +1,37 @@
-use std::ffi::CString;
 use std::io;
-use std::mem::{size_of, zeroed};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::os::fd::AsRawFd;
-use std::ptr::{addr_of_mut, null_mut};
 use std::time::Instant;
 
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::signal;
 use tracing::{debug, info, warn};
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::ffi::CString;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::mem::{size_of, zeroed};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::os::fd::RawFd;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::ptr::addr_of_mut;
+#[cfg(target_family = "unix")]
+use std::ptr::null_mut;
+#[cfg(windows)]
+use std::{ffi::CStr, os::windows::io::AsRawSocket, ptr::null_mut as win_null_mut};
+
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS},
+    NetworkManagement::IpHelper::{
+        GAA_FLAG_INCLUDE_PREFIX, GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
+    },
+    Networking::WinSock::{
+        AF_INET, IP_UNICAST_IF, IPPROTO_IP, SOCKADDR, SOCKADDR_IN, SOCKET_ERROR, setsockopt,
+    },
+};
 
 use crate::config::Config;
 use crate::engine::{Action, Engine, IncomingPacket, SendAction, SendTarget};
@@ -99,10 +121,10 @@ fn bind_socket(config: &Config) -> io::Result<UdpSocket> {
     socket.set_nonblocking(true)?;
 
     if let Some(interface) = &config.interface {
-        bind_to_device(socket.as_raw_fd(), interface)?;
+        bind_socket_to_interface(&socket, interface)?;
     }
 
-    enable_recv_ttl(socket.as_raw_fd())?;
+    enable_recv_ttl(&socket)?;
 
     let bind_addr = SocketAddrV4::new(config.bind_ip, config.aodv_port());
     let bind_result = socket.bind(&bind_addr.into());
@@ -138,6 +160,24 @@ async fn recv_datagram(
 }
 
 fn try_recv_datagram(
+    socket: &UdpSocket,
+    buffer: &mut [u8],
+) -> io::Result<(usize, SocketAddr, Option<u8>)> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        try_recv_datagram_with_ttl(socket, buffer)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        socket
+            .try_recv_from(buffer)
+            .map(|(size, source_addr)| (size, source_addr, None))
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn try_recv_datagram_with_ttl(
     socket: &UdpSocket,
     buffer: &mut [u8],
 ) -> io::Result<(usize, SocketAddr, Option<u8>)> {
@@ -239,6 +279,7 @@ pub(crate) async fn send_action(
     Ok(())
 }
 
+#[cfg(target_family = "unix")]
 fn interface_ipv4_addr(interface: &str) -> io::Result<Ipv4Addr> {
     let mut ifaddrs = null_mut();
     let result = unsafe { libc::getifaddrs(&mut ifaddrs) };
@@ -276,7 +317,75 @@ fn interface_ipv4_addr(interface: &str) -> io::Result<Ipv4Addr> {
     })
 }
 
-fn bind_to_device(fd: std::os::fd::RawFd, interface: &str) -> io::Result<()> {
+#[cfg(windows)]
+fn interface_ipv4_addr(interface: &str) -> io::Result<Ipv4Addr> {
+    windows_interface(interface).and_then(|win_interface| {
+        win_interface.ipv4.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no IPv4 address found for interface {interface}"),
+            )
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn bind_socket_to_interface(socket: &Socket, interface: &str) -> io::Result<()> {
+    bind_to_device(socket.as_raw_fd(), interface)
+}
+
+#[cfg(target_os = "macos")]
+fn bind_socket_to_interface(socket: &Socket, interface: &str) -> io::Result<()> {
+    let index = unix_interface_index(interface)?;
+    let result = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_BOUND_IF,
+            (&index as *const libc::c_uint).cast(),
+            size_of::<libc::c_uint>() as libc::socklen_t,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::Error::last_os_error().kind(),
+            format!(
+                "failed to bind socket to interface {interface}: {}",
+                io::Error::last_os_error()
+            ),
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn bind_socket_to_interface(socket: &Socket, interface: &str) -> io::Result<()> {
+    let index = windows_interface(interface)?.index.to_be();
+    let result = unsafe {
+        setsockopt(
+            socket.as_raw_socket() as usize,
+            IPPROTO_IP,
+            IP_UNICAST_IF,
+            (&index as *const u32).cast(),
+            std::mem::size_of::<u32>() as i32,
+        )
+    };
+    if result == SOCKET_ERROR {
+        Err(io::Error::new(
+            io::Error::last_os_error().kind(),
+            format!(
+                "failed to bind socket to interface {interface}: {}",
+                io::Error::last_os_error()
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn bind_to_device(fd: RawFd, interface: &str) -> io::Result<()> {
     let device = CString::new(interface)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "interface contains NUL"))?;
     let result = unsafe {
@@ -301,13 +410,19 @@ fn bind_to_device(fd: std::os::fd::RawFd, interface: &str) -> io::Result<()> {
     }
 }
 
-fn enable_recv_ttl(fd: std::os::fd::RawFd) -> io::Result<()> {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn enable_recv_ttl(socket: &Socket) -> io::Result<()> {
     let enabled: libc::c_int = 1;
+    #[cfg(target_os = "linux")]
+    let option = libc::IP_RECVTTL;
+    #[cfg(target_os = "macos")]
+    let option = libc::IP_RECVTTL;
+
     let result = unsafe {
         libc::setsockopt(
-            fd,
+            socket.as_raw_fd(),
             libc::IPPROTO_IP,
-            libc::IP_RECVTTL,
+            option,
             (&enabled as *const libc::c_int).cast(),
             size_of::<libc::c_int>() as libc::socklen_t,
         )
@@ -319,6 +434,12 @@ fn enable_recv_ttl(fd: std::os::fd::RawFd) -> io::Result<()> {
     }
 }
 
+#[cfg(windows)]
+fn enable_recv_ttl(_socket: &Socket) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn socket_addr_from_storage(
     storage: &libc::sockaddr_storage,
     length: libc::socklen_t,
@@ -339,17 +460,156 @@ fn socket_addr_from_storage(
     Ok(SocketAddr::V4(SocketAddrV4::new(ip, port)))
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 unsafe fn ttl_from_cmsgs(message: &libc::msghdr) -> Option<u8> {
     let mut cursor = unsafe { libc::CMSG_FIRSTHDR(message) };
     while !cursor.is_null() {
         let header = unsafe { &*cursor };
-        if header.cmsg_level == libc::IPPROTO_IP && header.cmsg_type == libc::IP_TTL {
+        #[cfg(target_os = "linux")]
+        let ttl_type = libc::IP_TTL;
+        #[cfg(target_os = "macos")]
+        let ttl_type = libc::IP_RECVTTL;
+
+        if header.cmsg_level == libc::IPPROTO_IP && header.cmsg_type == ttl_type {
             let value = unsafe { libc::CMSG_DATA(cursor) as *const libc::c_int };
             return unsafe { (*value).try_into().ok() };
         }
         cursor = unsafe { libc::CMSG_NXTHDR(message, cursor) };
     }
     None
+}
+
+#[cfg(target_os = "macos")]
+fn unix_interface_index(interface: &str) -> io::Result<libc::c_uint> {
+    let name = CString::new(interface)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "interface contains NUL"))?;
+    let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+    if index == 0 {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no interface found named {interface}"),
+        ))
+    } else {
+        Ok(index)
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy)]
+struct WindowsInterface {
+    index: u32,
+    ipv4: Option<Ipv4Addr>,
+}
+
+#[cfg(windows)]
+fn windows_interface(interface: &str) -> io::Result<WindowsInterface> {
+    let adapters = windows_adapters()?;
+    let requested_index = interface.parse::<u32>().ok();
+    let mut current: *const IP_ADAPTER_ADDRESSES_LH = adapters.as_ptr().cast();
+
+    while !current.is_null() {
+        let adapter = unsafe { &*current };
+        let index = unsafe { adapter.Anonymous1.Anonymous.IfIndex };
+        if requested_index == Some(index) || windows_adapter_name_matches(adapter, interface) {
+            return Ok(WindowsInterface {
+                index,
+                ipv4: windows_adapter_ipv4(adapter),
+            });
+        }
+        current = adapter.Next;
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("no interface found named {interface}"),
+    ))
+}
+
+#[cfg(windows)]
+fn windows_adapters() -> io::Result<Vec<u8>> {
+    let mut size = 15 * 1024;
+    loop {
+        let mut buffer = vec![0_u8; size as usize];
+        let result = unsafe {
+            GetAdaptersAddresses(
+                AF_INET as u32,
+                GAA_FLAG_INCLUDE_PREFIX,
+                win_null_mut(),
+                buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>(),
+                &mut size,
+            )
+        };
+
+        match result {
+            ERROR_SUCCESS => return Ok(buffer),
+            ERROR_BUFFER_OVERFLOW => continue,
+            error => {
+                return Err(io::Error::other(format!(
+                    "GetAdaptersAddresses failed with error {error}"
+                )));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_adapter_name_matches(adapter: &IP_ADAPTER_ADDRESSES_LH, interface: &str) -> bool {
+    let adapter_name = unsafe { c_string_lossy(adapter.AdapterName.cast_const().cast()) };
+    let friendly_name = unsafe { wide_string_lossy(adapter.FriendlyName.cast_const()) };
+    let description = unsafe { wide_string_lossy(adapter.Description.cast_const()) };
+
+    [adapter_name, friendly_name, description]
+        .into_iter()
+        .flatten()
+        .any(|name| name == interface)
+}
+
+#[cfg(windows)]
+fn windows_adapter_ipv4(adapter: &IP_ADAPTER_ADDRESSES_LH) -> Option<Ipv4Addr> {
+    let mut current = adapter.FirstUnicastAddress;
+    while !current.is_null() {
+        let address = unsafe { &(*current).Address };
+        if let Some(ip) = unsafe { ipv4_from_sockaddr(address.lpSockaddr, address.iSockaddrLength) }
+        {
+            return Some(ip);
+        }
+        current = unsafe { (*current).Next };
+    }
+    None
+}
+
+#[cfg(windows)]
+unsafe fn ipv4_from_sockaddr(sockaddr: *const SOCKADDR, length: i32) -> Option<Ipv4Addr> {
+    if sockaddr.is_null()
+        || length < std::mem::size_of::<SOCKADDR_IN>() as i32
+        || unsafe { (*sockaddr).sa_family } != AF_INET
+    {
+        return None;
+    }
+
+    let address = unsafe { &*(sockaddr.cast::<SOCKADDR_IN>()) };
+    let raw = unsafe { address.sin_addr.S_un.S_addr };
+    Some(Ipv4Addr::from(u32::from_be(raw)))
+}
+
+#[cfg(windows)]
+unsafe fn c_string_lossy(value: *const i8) -> Option<String> {
+    (!value.is_null()).then(|| unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() })
+}
+
+#[cfg(windows)]
+unsafe fn wide_string_lossy(value: *const u16) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+
+    let mut length = 0;
+    while unsafe { *value.add(length) } != 0 {
+        length += 1;
+    }
+    Some(String::from_utf16_lossy(unsafe {
+        std::slice::from_raw_parts(value, length)
+    }))
 }
 
 #[cfg(test)]
@@ -414,6 +674,7 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn recv_datagram_reports_inbound_ttl() {
         let socket = bind_socket(&loopback_config(0)).unwrap();

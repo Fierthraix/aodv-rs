@@ -15,5 +15,10 @@
 - [x] Expand routing test coverage with many topology, failure, retry, and timer scenarios.
 - [x] Add and verify a static build target for the daemon, including the intended target triple and build instructions.
 - [x] Add stricter RFC coverage for local repair and buffered data packets.
+- [x] Make the crate compile and build on Linux, macOS, and Windows while preserving Linux-specific AODV socket behavior.
+- [x] Expand CI to exercise Linux tests plus macOS and Windows builds.
+- [x] Fix the GitHub Actions sudo/rustup test failure.
+- [x] Add native macOS and Windows equivalents for interface selection instead of non-Linux placeholders.
+- [x] Add tag-gated crates.io publishing in CI and bump the crate to 0.2.0.
 - [x] Add rootless simulated end-to-end payload forwarding tests.
 - [x] Add rootless end-to-end payload tests for changing topologies.

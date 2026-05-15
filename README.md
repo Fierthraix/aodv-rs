@@ -13,3 +13,11 @@ Userspace AODV control-plane implementation based on RFC 3561.
 ```bash
 cargo install aodv
 ```
+
+## Platform support
+
+The protocol engine and UDP daemon build on Linux, macOS, and Windows. Linux
+uses `SO_BINDTODEVICE` for interface pinning and receives inbound TTL metadata.
+macOS uses `IP_BOUND_IF` plus the BSD TTL control-message path. Windows resolves
+adapters through `GetAdaptersAddresses` and uses `IP_UNICAST_IF` for outbound
+IPv4 interface selection; inbound TTL metadata is not currently exposed there.

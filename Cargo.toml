@@ -19,11 +19,13 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 etherparse = "0.20"
+tun-rs = { version = "2.8", features = ["async_tokio"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 futures-util = "0.3"
 rtnetlink = "0.21"
-tun-rs = { version = "2.8", features = ["async_tokio"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }

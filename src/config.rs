@@ -15,34 +15,40 @@ pub struct CliArgs {
     #[arg(short, long)]
     pub config: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(short = 'l', long)]
     pub local_ip: Option<Ipv4Addr>,
 
-    #[arg(long)]
+    #[arg(short = 'b', long)]
     pub bind_ip: Option<Ipv4Addr>,
 
-    #[arg(long)]
+    #[arg(short = 'B', long)]
     pub broadcast_ip: Option<Ipv4Addr>,
 
     #[arg(short, long)]
     pub port: Option<u16>,
 
-    #[arg(long)]
+    #[arg(short, long)]
     pub interface: Option<String>,
 
     #[arg(long)]
     pub disable_hello: bool,
 
-    #[arg(long, value_enum)]
+    #[arg(short = 'm', long, value_enum)]
     pub data_plane: Option<DataPlaneMode>,
 
-    #[arg(long)]
+    #[arg(short = 'P', long)]
     pub data_port: Option<u16>,
 
-    #[arg(long)]
+    #[arg(short = 'n', long)]
     pub tun_name: Option<String>,
 
+    #[arg(short = 't', long)]
+    pub tun_ip: Option<Ipv4Addr>,
+
     #[arg(long)]
+    pub tun_prefix: Option<u8>,
+
+    #[arg(short = 'M', long)]
     pub tun_mtu: Option<u16>,
 
     #[arg(long)]
@@ -81,6 +87,8 @@ pub struct Config {
     pub data_plane: DataPlaneMode,
     pub data_port: u16,
     pub tun_name: String,
+    pub tun_ip: Option<Ipv4Addr>,
+    pub tun_prefix: u8,
     pub tun_mtu: u16,
     pub route_metric: u32,
 }
@@ -141,11 +149,24 @@ impl Config {
         if let Some(tun_name) = args.tun_name {
             config.tun_name = tun_name;
         }
+        if let Some(tun_ip) = args.tun_ip {
+            config.tun_ip = Some(tun_ip);
+        }
+        if let Some(tun_prefix) = args.tun_prefix {
+            config.tun_prefix = tun_prefix;
+        }
         if let Some(tun_mtu) = args.tun_mtu {
             config.tun_mtu = tun_mtu;
         }
         if let Some(route_metric) = args.route_metric {
             config.route_metric = route_metric;
+        }
+
+        if config.local_ip == Ipv4Addr::UNSPECIFIED
+            && config.data_plane == DataPlaneMode::TunOverlay
+            && let Some(tun_ip) = config.tun_ip
+        {
+            config.local_ip = tun_ip;
         }
 
         if config.local_ip == Ipv4Addr::UNSPECIFIED {
@@ -272,6 +293,12 @@ impl Config {
         if let Some(value) = file.tun_name {
             self.tun_name = value;
         }
+        if let Some(value) = file.tun_ip {
+            self.tun_ip = Some(value);
+        }
+        if let Some(value) = file.tun_prefix {
+            self.tun_prefix = value;
+        }
         if let Some(value) = file.tun_mtu {
             self.tun_mtu = value;
         }
@@ -306,6 +333,8 @@ impl Default for Config {
             data_plane: DataPlaneMode::ControlOnly,
             data_port: AODV_PORT + 1,
             tun_name: "aodv0".to_string(),
+            tun_ip: None,
+            tun_prefix: 24,
             tun_mtu: 1400,
             route_metric: 100,
         }
@@ -363,6 +392,10 @@ struct FileConfig {
     data_port: Option<u16>,
     #[serde(default)]
     tun_name: Option<String>,
+    #[serde(default)]
+    tun_ip: Option<Ipv4Addr>,
+    #[serde(default)]
+    tun_prefix: Option<u8>,
     #[serde(default)]
     tun_mtu: Option<u16>,
     #[serde(default)]
@@ -430,6 +463,8 @@ TTL_THRESHOLD: 8
             data_plane: None,
             data_port: None,
             tun_name: None,
+            tun_ip: None,
+            tun_prefix: None,
             tun_mtu: None,
             route_metric: None,
         };
@@ -454,6 +489,8 @@ TTL_THRESHOLD: 8
         assert_eq!(config.data_plane, DataPlaneMode::ControlOnly);
         assert_eq!(config.data_port, AODV_PORT + 1);
         assert_eq!(config.tun_name, "aodv0");
+        assert_eq!(config.tun_ip, None);
+        assert_eq!(config.tun_prefix, 24);
         assert_eq!(config.tun_mtu, 1400);
         assert_eq!(config.route_metric, 100);
         assert_eq!(config.delete_period(), Duration::from_millis(15_005));
@@ -472,6 +509,8 @@ TTL_THRESHOLD: 8
             r#"data_plane: tun-overlay
 data_port: 1655
 tun_name: mesh0
+tun_ip: 10.10.0.1
+tun_prefix: 16
 tun_mtu: 1280
 route_metric: 77
 "#,
@@ -489,6 +528,8 @@ route_metric: 77
             data_plane: Some(DataPlaneMode::KernelRoutes),
             data_port: None,
             tun_name: None,
+            tun_ip: Some(Ipv4Addr::new(10, 20, 0, 1)),
+            tun_prefix: None,
             tun_mtu: None,
             route_metric: None,
         };
@@ -497,7 +538,73 @@ route_metric: 77
         assert_eq!(config.data_plane, DataPlaneMode::KernelRoutes);
         assert_eq!(config.data_port, 1655);
         assert_eq!(config.tun_name, "mesh0");
+        assert_eq!(config.tun_ip, Some(Ipv4Addr::new(10, 20, 0, 1)));
+        assert_eq!(config.tun_prefix, 16);
         assert_eq!(config.tun_mtu, 1280);
         assert_eq!(config.route_metric, 77);
+    }
+
+    #[test]
+    fn tun_overlay_uses_tun_ip_as_default_local_ip() {
+        let args = CliArgs {
+            config: None,
+            local_ip: None,
+            bind_ip: Some(Ipv4Addr::new(192, 0, 2, 10)),
+            broadcast_ip: None,
+            port: None,
+            interface: None,
+            disable_hello: false,
+            data_plane: Some(DataPlaneMode::TunOverlay),
+            data_port: None,
+            tun_name: None,
+            tun_ip: Some(Ipv4Addr::new(10, 10, 0, 1)),
+            tun_prefix: Some(16),
+            tun_mtu: None,
+            route_metric: None,
+        };
+
+        let config = Config::from_args(args).unwrap();
+
+        assert_eq!(config.bind_ip, Ipv4Addr::new(192, 0, 2, 10));
+        assert_eq!(config.local_ip, Ipv4Addr::new(10, 10, 0, 1));
+    }
+
+    #[test]
+    fn parses_common_short_flags() {
+        let args = CliArgs::try_parse_from([
+            "aodv",
+            "-l",
+            "10.10.0.1",
+            "-b",
+            "192.0.2.10",
+            "-B",
+            "192.0.2.255",
+            "-p",
+            "654",
+            "-i",
+            "wlan0",
+            "-m",
+            "tun-overlay",
+            "-P",
+            "1655",
+            "-n",
+            "mesh0",
+            "-t",
+            "10.10.0.1",
+            "-M",
+            "1280",
+        ])
+        .unwrap();
+
+        assert_eq!(args.local_ip, Some(Ipv4Addr::new(10, 10, 0, 1)));
+        assert_eq!(args.bind_ip, Some(Ipv4Addr::new(192, 0, 2, 10)));
+        assert_eq!(args.broadcast_ip, Some(Ipv4Addr::new(192, 0, 2, 255)));
+        assert_eq!(args.port, Some(654));
+        assert_eq!(args.interface.as_deref(), Some("wlan0"));
+        assert_eq!(args.data_plane, Some(DataPlaneMode::TunOverlay));
+        assert_eq!(args.data_port, Some(1655));
+        assert_eq!(args.tun_name.as_deref(), Some("mesh0"));
+        assert_eq!(args.tun_ip, Some(Ipv4Addr::new(10, 10, 0, 1)));
+        assert_eq!(args.tun_mtu, Some(1280));
     }
 }

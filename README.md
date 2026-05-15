@@ -28,9 +28,10 @@ The daemon has three data-plane modes:
 
 - `control-only`: the default. The daemon exchanges AODV control packets and
   logs route/data actions, but does not move operating-system data traffic.
-- `tun-overlay`: Linux-only. The daemon creates or opens a TUN interface such as
-  `aodv0`, reads raw IPv4 packets from it, discovers AODV routes, and forwards
-  packets to the next hop over a UDP overlay socket.
+- `tun-overlay`: Linux and Windows. The daemon creates or opens a TUN interface
+  such as `aodv0`, reads raw IPv4 packets from it, discovers AODV routes, and
+  forwards packets to the next hop over a UDP overlay socket. Windows uses the
+  Wintun driver through `tun-rs`.
 - `kernel-routes`: Linux-only. The daemon installs and removes Linux host routes
   for discovered AODV destinations with netlink, leaving packet forwarding to the
   kernel.
@@ -43,11 +44,17 @@ packets according to the AODV route table.
 `kernel-routes` is closer to classic AODV router behavior: when AODV discovers a
 route, the daemon adds a route like `destination/32 via next_hop dev wlan0`.
 
+Common CLI options have short aliases: `-l/--local-ip`, `-b/--bind-ip`,
+`-B/--broadcast-ip`, `-p/--port`, `-i/--interface`, `-m/--data-plane`,
+`-P/--data-port`, `-n/--tun-name`, `-t/--tun-ip`, and `-M/--tun-mtu`.
+
 ## Privileges
 
-Full data-plane routing is not truly rootless on Linux. Creating/configuring TUN
-devices and changing kernel routes require `CAP_NET_ADMIN` or root. Binding the
-default AODV UDP port `654` can also require `CAP_NET_BIND_SERVICE`.
+Full data-plane routing is not truly rootless. On Linux, creating/configuring
+TUN devices and changing kernel routes require `CAP_NET_ADMIN` or root. Binding
+the default AODV UDP port `654` can also require `CAP_NET_BIND_SERVICE`.
+On Windows, Wintun adapter creation/configuration requires Administrator rights
+and `wintun.dll` must be available next to the executable or in `PATH`.
 
 You can grant capabilities to the built binary:
 
@@ -64,10 +71,25 @@ sudo ip link set aodv0 up
 sudo ip route add 10.10.0.0/16 dev aodv0
 ```
 
-Example TUN overlay:
+Example TUN overlay. In this mode `--local-ip` is the overlay/TUN address and
+`--bind-ip` is the underlay address used for AODV UDP sockets:
 
 ```bash
-aodv --interface wlan0 --local-ip 10.0.0.1 --data-plane tun-overlay --tun-name aodv0
+aodv --interface wlan0 --bind-ip 10.0.0.1 --local-ip 10.10.0.1 --data-plane tun-overlay --tun-name aodv0
+```
+
+Linux can also let the daemon assign the TUN address when it has the required
+capability:
+
+```bash
+aodv --interface wlan0 --bind-ip 10.0.0.1 --local-ip 10.10.0.1 --data-plane tun-overlay --tun-name aodv0 --tun-ip 10.10.0.1 --tun-prefix 16
+```
+
+Windows Wintun overlay requires a TUN address/prefix because there is no Linux
+`ip` command equivalent in this backend:
+
+```powershell
+aodv.exe --bind-ip 10.0.0.1 --local-ip 10.10.0.1 --data-plane tun-overlay --tun-name aodv0 --tun-ip 10.10.0.1 --tun-prefix 16
 ```
 
 Example kernel route mode:

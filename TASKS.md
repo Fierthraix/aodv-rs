@@ -25,6 +25,8 @@
 - [x] Add automated CI test coverage report artifacts and local just commands for tests/coverage.
 - [x] Add a real daemon data plane instead of only logging buffered packet flush/drop actions.
 - [x] Add a Linux TUN overlay backend for userspace IPv4 packet forwarding.
+- [x] Add Windows Wintun userspace TUN overlay support.
+- [x] Add short CLI aliases for common daemon and TUN options.
 - [x] Add a Linux kernel route-table backend for classic AODV route installation/removal.
 - [x] Complete RREP-ACK and blacklist handling for unidirectional link detection.
 - [x] Add RFC-oriented comments to protocol, daemon, data-plane, and test coverage paths.
@@ -32,3 +34,4 @@
 - [ ] Tighten local repair TTL calculation when forwarding-path sender distance is available.
 - [x] Document routing modes, TUN setup, kernel route behavior, and required Linux capabilities.
 - [ ] Add privileged Linux namespace/TUN integration tests gated behind an explicit opt-in environment variable.
+- [ ] Add Windows Wintun smoke testing in CI once a reliable non-interactive driver setup is available.

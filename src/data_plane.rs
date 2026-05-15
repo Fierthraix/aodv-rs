@@ -19,10 +19,10 @@ pub enum DataPlane {
     // ControlOnly is useful for protocol testing and route visibility: the
     // daemon runs the RFC control plane but only logs data-plane actions.
     ControlOnly,
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    TunOverlay(tun_overlay::TunOverlay),
     #[cfg(target_os = "linux")]
-    TunOverlay(linux::TunOverlay),
-    #[cfg(target_os = "linux")]
-    KernelRoutes(linux::KernelRoutes),
+    KernelRoutes(linux_routes::KernelRoutes),
 }
 
 impl DataPlane {
@@ -30,11 +30,13 @@ impl DataPlane {
         match config.data_plane {
             DataPlaneMode::ControlOnly => Ok(Self::ControlOnly),
             DataPlaneMode::TunOverlay => {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "windows"))]
                 {
-                    linux::TunOverlay::new(config).await.map(Self::TunOverlay)
+                    tun_overlay::TunOverlay::new(config)
+                        .await
+                        .map(Self::TunOverlay)
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                 {
                     unsupported("tun-overlay")
                 }
@@ -42,7 +44,7 @@ impl DataPlane {
             DataPlaneMode::KernelRoutes => {
                 #[cfg(target_os = "linux")]
                 {
-                    linux::KernelRoutes::new(config)
+                    linux_routes::KernelRoutes::new(config)
                         .await
                         .map(Self::KernelRoutes)
                 }
@@ -55,12 +57,12 @@ impl DataPlane {
     }
 
     pub fn has_events(&self) -> bool {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
             matches!(self, Self::TunOverlay(_))
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         {
             false
         }
@@ -71,7 +73,7 @@ impl DataPlane {
             // No payload source exists in control-only mode, so this branch is
             // never selected unless has_events() is changed incorrectly.
             Self::ControlOnly => std::future::pending().await,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             Self::TunOverlay(tun) => tun.next_event().await,
             #[cfg(target_os = "linux")]
             Self::KernelRoutes(_) => std::future::pending().await,
@@ -81,7 +83,7 @@ impl DataPlane {
     pub async fn handle_action(&mut self, action: Action) -> io::Result<()> {
         match self {
             Self::ControlOnly => log_control_action(action),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             Self::TunOverlay(tun) => tun.handle_action(action).await,
             #[cfg(target_os = "linux")]
             Self::KernelRoutes(routes) => routes.handle_action(action).await,
@@ -98,7 +100,7 @@ impl DataPlane {
                 );
                 Ok(())
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             Self::TunOverlay(tun) => tun.deliver_local(packet).await,
             #[cfg(target_os = "linux")]
             Self::KernelRoutes(_) => Ok(()),
@@ -153,25 +155,25 @@ fn log_control_action(action: Action) -> io::Result<()> {
 fn unsupported(mode: &str) -> io::Result<DataPlane> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        format!("{mode} data plane is currently supported only on Linux"),
+        format!("{mode} data plane is not supported on this platform"),
     ))
 }
 
-#[cfg(target_os = "linux")]
-mod linux {
-    use std::collections::BTreeSet;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod tun_overlay {
     use std::io;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use etherparse::Ipv4HeaderSlice;
-    use futures_util::TryStreamExt;
-    use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
     use tokio::net::UdpSocket;
     use tun_rs::{AsyncDevice, DeviceBuilder};
 
     use super::{DataPlaneEvent, log_control_action};
     use crate::config::Config;
     use crate::engine::{Action, BufferedPacket};
+
+    #[cfg(target_os = "linux")]
+    use super::linux_routes::LinuxRoutes;
 
     pub struct TunOverlay {
         // TUN overlay keeps user IPv4 packets in userspace and forwards them to
@@ -180,45 +182,77 @@ mod linux {
         data_socket: UdpSocket,
         data_port: u16,
         mtu: usize,
+        #[cfg(target_os = "linux")]
         routes: LinuxRoutes,
-    }
-
-    #[derive(Debug)]
-    pub struct KernelRoutes {
-        routes: LinuxRoutes,
-    }
-
-    #[derive(Debug)]
-    struct LinuxRoutes {
-        handle: Handle,
-        interface: String,
-        route_metric: u32,
-        managed: BTreeSet<Ipv4Addr>,
     }
 
     impl TunOverlay {
         pub async fn new(config: &Config) -> io::Result<Self> {
-            let device = DeviceBuilder::new()
+            if let Some(tun_ip) = config.tun_ip
+                && config.local_ip != tun_ip
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--local-ip must match --tun-ip in tun-overlay mode; use --bind-ip for the underlay socket address",
+                ));
+            }
+
+            let mut builder = DeviceBuilder::new()
                 .name(config.tun_name.clone())
-                .mtu(config.tun_mtu)
-                .build_async()
-                .map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!(
-                            "failed to create/open TUN device {}: {error}",
-                            config.tun_name
-                        ),
-                    )
-                })?;
+                .mtu(config.tun_mtu);
+
+            if let Some(tun_ip) = config.tun_ip {
+                builder = builder.ipv4(tun_ip, config.tun_prefix, None);
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                if config.tun_ip.is_none() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--tun-ip is required for Windows tun-overlay mode",
+                    ));
+                }
+
+                builder = builder
+                    .description(format!("aodv-rs {}", config.tun_name))
+                    .metric(config.route_metric.min(u16::MAX as u32) as u16);
+            }
+
+            let device = builder.build_async().map_err(|error| {
+                #[cfg(target_os = "windows")]
+                {
+                    if error.kind() == io::ErrorKind::NotFound {
+                        return io::Error::new(
+                            error.kind(),
+                            format!(
+                                "failed to create/open Wintun adapter {}: {error}; ensure wintun.dll is available next to the executable or in PATH",
+                                config.tun_name
+                            ),
+                        );
+                    }
+                }
+
+                io::Error::new(
+                    error.kind(),
+                    format!(
+                        "failed to create/open TUN device {}: {error}",
+                        config.tun_name
+                    ),
+                )
+            })?;
             let actual_name = device.name()?;
             let data_socket = UdpSocket::bind((config.bind_ip, config.data_port())).await?;
-            let routes = LinuxRoutes::new(actual_name, config.route_metric).await?;
+
+            #[cfg(target_os = "linux")]
+            let routes = LinuxRoutes::new(actual_name.clone(), config.route_metric).await?;
 
             tracing::info!(
-                tun = %config.tun_name,
+                tun = %actual_name,
                 data_port = config.data_port(),
                 mtu = config.tun_mtu,
+                tun_ip = ?config.tun_ip,
+                tun_prefix = config.tun_prefix,
                 "TUN overlay data plane started"
             );
 
@@ -227,6 +261,7 @@ mod linux {
                 data_socket,
                 data_port: config.data_port(),
                 mtu: config.tun_mtu as usize,
+                #[cfg(target_os = "linux")]
                 routes,
             })
         }
@@ -286,14 +321,11 @@ mod linux {
                     Ok(())
                 }
                 Action::RouteDiscovered { destination, .. } => {
-                    // The TUN mode installs a host route to the virtual device
-                    // so the kernel sends future packets for that destination
-                    // into this daemon.
-                    self.routes.install_dev_route(destination).await
+                    self.install_tun_route(destination).await
                 }
                 Action::RouteInvalidated { destination, .. }
                 | Action::RouteDiscoveryFailed { destination } => {
-                    self.routes.remove_route(destination).await
+                    self.remove_tun_route(destination).await
                 }
                 other => log_control_action(other),
             }
@@ -321,6 +353,70 @@ mod linux {
             );
             Ok(())
         }
+
+        #[cfg(target_os = "linux")]
+        async fn install_tun_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+            // Linux TUN mode installs a host route to the virtual device so the
+            // kernel sends future packets for that destination into this daemon.
+            self.routes.install_dev_route(destination).await
+        }
+
+        #[cfg(target_os = "windows")]
+        async fn install_tun_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+            // Windows Wintun mode relies on the adapter prefix configured by
+            // tun-rs. Per-destination route table management is intentionally
+            // not part of this userspace-only backend.
+            tracing::debug!(%destination, "route discovered for Wintun overlay");
+            Ok(())
+        }
+
+        #[cfg(target_os = "linux")]
+        async fn remove_tun_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+            self.routes.remove_route(destination).await
+        }
+
+        #[cfg(target_os = "windows")]
+        async fn remove_tun_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+            tracing::debug!(%destination, "route removed from Wintun overlay state");
+            Ok(())
+        }
+    }
+
+    fn ipv4_destination(packet: &[u8]) -> io::Result<Ipv4Addr> {
+        let header = Ipv4HeaderSlice::from_slice(packet).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("data plane packet is not valid IPv4: {error}"),
+            )
+        })?;
+        Ok(header.destination_addr())
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_routes {
+    use std::collections::BTreeSet;
+    use std::io;
+    use std::net::Ipv4Addr;
+
+    use futures_util::TryStreamExt;
+    use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
+
+    use super::log_control_action;
+    use crate::config::Config;
+    use crate::engine::Action;
+
+    #[derive(Debug)]
+    pub struct KernelRoutes {
+        routes: LinuxRoutes,
+    }
+
+    #[derive(Debug)]
+    pub struct LinuxRoutes {
+        handle: Handle,
+        interface: String,
+        route_metric: u32,
+        managed: BTreeSet<Ipv4Addr>,
     }
 
     impl KernelRoutes {
@@ -359,7 +455,7 @@ mod linux {
     }
 
     impl LinuxRoutes {
-        async fn new(interface: String, route_metric: u32) -> io::Result<Self> {
+        pub async fn new(interface: String, route_metric: u32) -> io::Result<Self> {
             let (connection, handle, _) =
                 new_connection().map_err(|error| io::Error::other(error.to_string()))?;
             tokio::spawn(connection);
@@ -371,7 +467,7 @@ mod linux {
             })
         }
 
-        async fn install_dev_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+        pub async fn install_dev_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
             let ifindex = self.interface_index().await?;
             self.remove_route(destination).await?;
             let mut route = RouteMessageBuilder::<Ipv4Addr>::new()
@@ -420,7 +516,7 @@ mod linux {
             Ok(())
         }
 
-        async fn remove_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
+        pub async fn remove_route(&mut self, destination: Ipv4Addr) -> io::Result<()> {
             if !self.managed.remove(&destination) {
                 return Ok(());
             }
@@ -454,15 +550,5 @@ mod linux {
                 })?;
             Ok(link.header.index)
         }
-    }
-
-    fn ipv4_destination(packet: &[u8]) -> io::Result<Ipv4Addr> {
-        let header = Ipv4HeaderSlice::from_slice(packet).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("data plane packet is not valid IPv4: {error}"),
-            )
-        })?;
-        Ok(header.destination_addr())
     }
 }

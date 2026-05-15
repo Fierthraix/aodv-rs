@@ -25,7 +25,8 @@ Modernize this repository from its years-old Rust starter code into a working AO
 - Target Rust edition `2024`.
 - Replace deprecated Tokio 0.1 / futures 0.1 era code with Tokio 1.x style async code.
 - Keep the implementation as a userspace AODV control-plane daemon plus reusable protocol engine.
-- Do not assume kernel routing-table manipulation is required for this first version.
+- Keep kernel routing-table manipulation behind explicit data-plane modes; the
+  default remains a rootless control-only daemon.
 - Focus on RFC 3561 unicast control-plane behavior:
   - message encoding/decoding
   - route discovery
@@ -61,12 +62,13 @@ Modernize this repository from its years-old Rust starter code into a working AO
   - a typed config loader with YAML compatibility for the old config format
   - RFC message encode/decode support for RREQ, RREP, RERR, RREP-ACK, and hello interval extensions
   - a protocol engine covering route discovery, duplicate suppression, reverse/forward route maintenance, RREP handling, RERR handling, hello tracking, and timer-driven expiry
-  - a Tokio UDP daemon wrapper around the engine with real Linux UDP socket setup, interface pinning, and inbound TTL reception
+  - a Tokio UDP daemon wrapper around the engine with real UDP socket setup, interface pinning, and inbound TTL reception where supported
+  - optional data-plane backends: control-only logging, Linux/Windows TUN overlay, and Linux kernel route-table updates
   - deterministic multi-node simulation tests and real-UDP multi-node integration tests
   - a verified static build path for `x86_64-unknown-linux-musl`
 
 ## Known Limitations
 
 - Local repair is implemented, but the repair TTL currently uses the existing route hop count plus `LOCAL_ADD_TTL` as a userspace approximation rather than deriving sender-distance from a real forwarding path.
-- Buffered data-packet handling is implemented inside the protocol engine, but the daemon currently logs flush/drop actions instead of owning a full end-to-end payload queue and reinjection path.
-- Kernel routing-table integration is still out of scope for this repository version.
+- Full dataplane tests that create TUN/Wintun adapters or mutate OS route tables are not part of the rootless test suite yet.
+- Windows has userspace Wintun overlay support, but not a Windows route-table backend.

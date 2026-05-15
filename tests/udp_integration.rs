@@ -85,6 +85,8 @@ impl UdpMesh {
     }
 
     async fn run_until_idle(&mut self, max_steps: usize) -> io::Result<()> {
+        let mut idle_rounds = 0;
+
         for _ in 0..max_steps {
             let mut progressed = false;
 
@@ -131,7 +133,12 @@ impl UdpMesh {
                 }
             }
 
-            if !progressed {
+            if progressed {
+                idle_rounds = 0;
+            } else if idle_rounds < 4 {
+                idle_rounds += 1;
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            } else {
                 break;
             }
         }

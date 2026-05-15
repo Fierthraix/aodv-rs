@@ -34,6 +34,7 @@ use windows_sys::Win32::{
 };
 
 use crate::config::Config;
+use crate::data_plane::{DataPlane, DataPlaneEvent};
 use crate::engine::{Action, Engine, IncomingPacket, SendAction, SendTarget};
 use crate::message::Message;
 
@@ -50,9 +51,15 @@ pub async fn run(config: Config) -> io::Result<()> {
     );
 
     let mut engine = Engine::new(config.clone());
+    let mut data_plane = DataPlane::new(&config).await?;
+    let mut next_data_packet_id = 1_u64;
     let mut buffer = [0_u8; 2048];
 
     loop {
+        // The daemon is intentionally just an event pump.  RFC state changes
+        // happen inside Engine; this loop feeds it control datagrams, data
+        // plane packets, and timer deadlines, then executes the returned
+        // actions on sockets or route backends.
         let now = Instant::now();
         let deadline = engine.next_deadline(now);
 
@@ -84,14 +91,44 @@ pub async fn run(config: Config) -> io::Result<()> {
                             },
                             Instant::now(),
                         );
-                        execute_actions(&socket, &config, actions).await?;
+                        execute_actions(&socket, &config, &mut data_plane, actions).await?;
                     }
                     Err(error) => warn!(%source, %error, "dropping invalid datagram"),
                 }
             }
+            event = data_plane.next_event(), if data_plane.has_events() => {
+                let event = event?;
+                let now = Instant::now();
+                match event {
+                    DataPlaneEvent::Packet {
+                        destination,
+                        mut packet,
+                    } if destination == config.local_ip => {
+                        if packet.id == 0 {
+                            packet.id = next_data_packet_id;
+                            next_data_packet_id = next_data_packet_id.wrapping_add(1);
+                        }
+                        data_plane.deliver_local(packet).await?;
+                    }
+                    DataPlaneEvent::Packet {
+                        destination,
+                        mut packet,
+                    } => {
+                        if packet.id == 0 {
+                            packet.id = next_data_packet_id;
+                            next_data_packet_id = next_data_packet_id.wrapping_add(1);
+                        }
+                        let actions = engine.submit_data_packet(destination, packet, now);
+                        execute_actions(&socket, &config, &mut data_plane, actions).await?;
+                    }
+                    DataPlaneEvent::LocalDelivery { packet } => {
+                        data_plane.deliver_local(packet).await?;
+                    }
+                }
+            }
             _ = sleep_until_deadline(deadline), if deadline.is_some() => {
                 let actions = engine.tick(Instant::now());
-                execute_actions(&socket, &config, actions).await?;
+                execute_actions(&socket, &config, &mut data_plane, actions).await?;
             }
         }
     }
@@ -124,6 +161,9 @@ fn bind_socket(config: &Config) -> io::Result<UdpSocket> {
         bind_socket_to_interface(&socket, interface)?;
     }
 
+    // AODV uses IP TTL to limit expanding-ring RREQ floods and HELLO messages.
+    // Receiving TTL lets the engine distinguish one-hop HELLO RREPs from
+    // ordinary forwarded RREPs on Unix platforms that expose it.
     enable_recv_ttl(&socket)?;
 
     let bind_addr = SocketAddrV4::new(config.bind_ip, config.aodv_port());
@@ -170,6 +210,8 @@ fn try_recv_datagram(
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
+        // Windows builds and runs the daemon, but inbound TTL metadata is not
+        // currently plumbed through this portability layer.
         socket
             .try_recv_from(buffer)
             .map(|(size, source_addr)| (size, source_addr, None))
@@ -215,49 +257,16 @@ async fn sleep_until_deadline(deadline: Option<Instant>) {
 async fn execute_actions(
     socket: &UdpSocket,
     config: &Config,
+    data_plane: &mut DataPlane,
     actions: Vec<Action>,
 ) -> io::Result<()> {
     for action in actions {
         match action {
+            // Control packets remain on the AODV UDP socket; all non-send
+            // actions represent route/data-plane effects selected by the
+            // configured backend.
             Action::Send(send) => send_action(socket, config, &send).await?,
-            Action::ForwardBufferedPackets {
-                destination,
-                next_hop,
-                packets,
-            } => info!(
-                %destination,
-                %next_hop,
-                count = packets.len(),
-                "buffered packets ready to forward"
-            ),
-            Action::DropBufferedPackets {
-                destination,
-                packets,
-            } => warn!(
-                %destination,
-                count = packets.len(),
-                "dropping buffered packets"
-            ),
-            Action::RouteDiscovered {
-                destination,
-                next_hop,
-                hop_count,
-            } => info!(%destination, %next_hop, hop_count, "route discovered"),
-            Action::RouteInvalidated {
-                destination,
-                next_hop,
-            } => {
-                info!(%destination, %next_hop, "route invalidated");
-            }
-            Action::RouteDiscoveryFailed { destination } => {
-                warn!(%destination, "route discovery failed");
-            }
-            Action::LocalRepairStarted { destination, ttl } => {
-                info!(%destination, ttl, "local repair started");
-            }
-            Action::LocalRepairFailed { destination } => {
-                warn!(%destination, "local repair failed");
-            }
+            other => data_plane.handle_action(other).await?,
         }
     }
     Ok(())
@@ -626,6 +635,8 @@ mod tests {
         }
     }
 
+    // Confirms daemon send actions encode AODV messages and write them to the
+    // configured UDP port with both normal RREQ and HELLO-shaped RREP payloads.
     #[tokio::test]
     async fn send_action_writes_udp_datagram() {
         let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -674,6 +685,8 @@ mod tests {
         ));
     }
 
+    // Linux-specific smoke test for the recvmsg control-message path that
+    // extracts inbound TTL, which the engine needs for HELLO recognition.
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn recv_datagram_reports_inbound_ttl() {
@@ -710,6 +723,8 @@ mod tests {
         ));
     }
 
+    // Proves runtime config can infer local_ip from bind_ip for loopback and
+    // scripted test deployments that do not name a real interface.
     #[test]
     fn finalize_runtime_config_uses_bind_ip_as_local_ip() {
         let config = Config {

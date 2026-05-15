@@ -3,7 +3,7 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -32,6 +32,29 @@ pub struct CliArgs {
 
     #[arg(long)]
     pub disable_hello: bool,
+
+    #[arg(long, value_enum)]
+    pub data_plane: Option<DataPlaneMode>,
+
+    #[arg(long)]
+    pub data_port: Option<u16>,
+
+    #[arg(long)]
+    pub tun_name: Option<String>,
+
+    #[arg(long)]
+    pub tun_mtu: Option<u16>,
+
+    #[arg(long)]
+    pub route_metric: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataPlaneMode {
+    ControlOnly,
+    TunOverlay,
+    KernelRoutes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +78,11 @@ pub struct Config {
     pub ttl_start: u8,
     pub ttl_increment: u8,
     pub ttl_threshold: u8,
+    pub data_plane: DataPlaneMode,
+    pub data_port: u16,
+    pub tun_name: String,
+    pub tun_mtu: u16,
+    pub route_metric: u32,
 }
 
 #[derive(Debug, Error)]
@@ -103,6 +131,21 @@ impl Config {
         }
         if args.disable_hello {
             config.enable_hello = false;
+        }
+        if let Some(data_plane) = args.data_plane {
+            config.data_plane = data_plane;
+        }
+        if let Some(data_port) = args.data_port {
+            config.data_port = data_port;
+        }
+        if let Some(tun_name) = args.tun_name {
+            config.tun_name = tun_name;
+        }
+        if let Some(tun_mtu) = args.tun_mtu {
+            config.tun_mtu = tun_mtu;
+        }
+        if let Some(route_metric) = args.route_metric {
+            config.route_metric = route_metric;
         }
 
         if config.local_ip == Ipv4Addr::UNSPECIFIED {
@@ -156,6 +199,10 @@ impl Config {
 
     pub fn aodv_port(&self) -> u16 {
         self.port
+    }
+
+    pub fn data_port(&self) -> u16 {
+        self.data_port
     }
 
     fn apply_file_config(&mut self, file: FileConfig) {
@@ -216,6 +263,21 @@ impl Config {
         if let Some(value) = file.ttl_threshold {
             self.ttl_threshold = value;
         }
+        if let Some(value) = file.data_plane {
+            self.data_plane = value;
+        }
+        if let Some(value) = file.data_port {
+            self.data_port = value;
+        }
+        if let Some(value) = file.tun_name {
+            self.tun_name = value;
+        }
+        if let Some(value) = file.tun_mtu {
+            self.tun_mtu = value;
+        }
+        if let Some(value) = file.route_metric {
+            self.route_metric = value;
+        }
     }
 }
 
@@ -241,6 +303,11 @@ impl Default for Config {
             ttl_start: 1,
             ttl_increment: 2,
             ttl_threshold: 7,
+            data_plane: DataPlaneMode::ControlOnly,
+            data_port: AODV_PORT + 1,
+            tun_name: "aodv0".to_string(),
+            tun_mtu: 1400,
+            route_metric: 100,
         }
     }
 }
@@ -290,6 +357,16 @@ struct FileConfig {
     ttl_increment: Option<u8>,
     #[serde(default, alias = "TTL_THRESHOLD")]
     ttl_threshold: Option<u8>,
+    #[serde(default)]
+    data_plane: Option<DataPlaneMode>,
+    #[serde(default)]
+    data_port: Option<u16>,
+    #[serde(default)]
+    tun_name: Option<String>,
+    #[serde(default)]
+    tun_mtu: Option<u16>,
+    #[serde(default)]
+    route_metric: Option<u32>,
 }
 
 impl FileConfig {
@@ -315,6 +392,8 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
+    // Keeps compatibility with the old YAML keys while proving the modern
+    // Config defaults still fill in newer data-plane fields.
     #[test]
     fn parses_legacy_yaml_config() {
         let file = NamedTempFile::new().unwrap();
@@ -348,6 +427,11 @@ TTL_THRESHOLD: 8
             port: None,
             interface: None,
             disable_hello: false,
+            data_plane: None,
+            data_port: None,
+            tun_name: None,
+            tun_mtu: None,
+            route_metric: None,
         };
         let config = Config::from_args(args).unwrap();
 
@@ -367,9 +451,53 @@ TTL_THRESHOLD: 8
         assert_eq!(config.ttl_start, 2);
         assert_eq!(config.ttl_increment, 3);
         assert_eq!(config.ttl_threshold, 8);
+        assert_eq!(config.data_plane, DataPlaneMode::ControlOnly);
+        assert_eq!(config.data_port, AODV_PORT + 1);
+        assert_eq!(config.tun_name, "aodv0");
+        assert_eq!(config.tun_mtu, 1400);
+        assert_eq!(config.route_metric, 100);
         assert_eq!(config.delete_period(), Duration::from_millis(15_005));
         assert_eq!(config.net_traversal_time(), Duration::from_millis(2_952));
         assert_eq!(config.path_discovery_time(), Duration::from_millis(5_904));
         assert_eq!(config.ring_traversal_time(0), Duration::from_millis(246));
+    }
+
+    // Covers the data-plane configuration merge: file values provide defaults,
+    // and explicit CLI arguments take precedence over the file.
+    #[test]
+    fn parses_data_plane_options() {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(
+            file.path(),
+            r#"data_plane: tun-overlay
+data_port: 1655
+tun_name: mesh0
+tun_mtu: 1280
+route_metric: 77
+"#,
+        )
+        .unwrap();
+
+        let args = CliArgs {
+            config: Some(file.path().to_path_buf()),
+            local_ip: None,
+            bind_ip: None,
+            broadcast_ip: None,
+            port: None,
+            interface: None,
+            disable_hello: false,
+            data_plane: Some(DataPlaneMode::KernelRoutes),
+            data_port: None,
+            tun_name: None,
+            tun_mtu: None,
+            route_metric: None,
+        };
+        let config = Config::from_args(args).unwrap();
+
+        assert_eq!(config.data_plane, DataPlaneMode::KernelRoutes);
+        assert_eq!(config.data_port, 1655);
+        assert_eq!(config.tun_name, "mesh0");
+        assert_eq!(config.tun_mtu, 1280);
+        assert_eq!(config.route_metric, 77);
     }
 }

@@ -554,6 +554,92 @@ fn payload_is_not_delivered_when_destination_unreachable() {
 }
 
 #[test]
+fn buffered_payload_is_delivered_after_topology_connects() {
+    let mut network = SimNetwork::new();
+    for node in [ip(1), ip(2), ip(3)] {
+        network.add_node(node);
+    }
+    network.link(ip(1), ip(2));
+
+    network.send_payload(ip(1), ip(3), b"late-link".to_vec());
+    network.advance_by(Duration::from_millis(150));
+    assert!(network.delivered_packets.is_empty());
+
+    network.link(ip(2), ip(3));
+    network.advance_by(Duration::from_millis(200));
+
+    assert_eq!(
+        network.delivered_packets,
+        vec![DeliveredPacket {
+            source: ip(1),
+            destination: ip(3),
+            payload: b"late-link".to_vec(),
+            path: vec![ip(1), ip(2), ip(3)],
+        }]
+    );
+    let route = network.node(ip(1)).route(ip(3)).unwrap();
+    assert_eq!(route.state, RouteState::Valid);
+    assert_eq!(route.next_hop, ip(2));
+}
+
+#[test]
+fn payload_rediscovery_uses_alternate_path_after_topology_break() {
+    let mut network = SimNetwork::new();
+    for node in [ip(1), ip(2), ip(3), ip(4)] {
+        network.add_node(node);
+    }
+    network.link(ip(1), ip(2));
+    network.link(ip(2), ip(4));
+    network.link(ip(1), ip(3));
+    network.link(ip(3), ip(4));
+
+    network.send_payload(ip(1), ip(4), b"before-break".to_vec());
+    network.advance_by(Duration::from_millis(300));
+    assert_eq!(
+        network.delivered_packets,
+        vec![DeliveredPacket {
+            source: ip(1),
+            destination: ip(4),
+            payload: b"before-break".to_vec(),
+            path: vec![ip(1), ip(2), ip(4)],
+        }]
+    );
+    assert_eq!(network.node(ip(1)).route(ip(4)).unwrap().next_hop, ip(2));
+
+    network.unlink(ip(2), ip(4));
+    network.handle_link_loss(ip(2), ip(4));
+    network.run_until_idle(128);
+    assert_eq!(
+        network.node(ip(1)).route(ip(4)).unwrap().state,
+        RouteState::Invalid
+    );
+
+    network.send_payload(ip(1), ip(4), b"after-break".to_vec());
+    network.advance_by(Duration::from_millis(300));
+
+    assert_eq!(
+        network.delivered_packets,
+        vec![
+            DeliveredPacket {
+                source: ip(1),
+                destination: ip(4),
+                payload: b"before-break".to_vec(),
+                path: vec![ip(1), ip(2), ip(4)],
+            },
+            DeliveredPacket {
+                source: ip(1),
+                destination: ip(4),
+                payload: b"after-break".to_vec(),
+                path: vec![ip(1), ip(3), ip(4)],
+            },
+        ]
+    );
+    let route = network.node(ip(1)).route(ip(4)).unwrap();
+    assert_eq!(route.state, RouteState::Valid);
+    assert_eq!(route.next_hop, ip(3));
+}
+
+#[test]
 fn destination_learns_reverse_route_from_discovery() {
     let mut network = SimNetwork::new();
     for node in [ip(1), ip(2), ip(3)] {

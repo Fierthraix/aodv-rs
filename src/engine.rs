@@ -14,6 +14,9 @@ pub struct IncomingPacket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    // The engine is deterministic and side-effect free: every RFC decision is
+    // returned as an action for the daemon or tests to execute.  This keeps
+    // socket I/O, TUN writes, and route-table changes out of protocol state.
     Send(SendAction),
     ForwardBufferedPackets {
         destination: Ipv4Addr,
@@ -72,6 +75,10 @@ pub struct BufferedPacket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteEntry {
+    // RFC 3561 route entries are keyed by destination and carry the freshest
+    // known destination sequence number, hop count, next hop, lifetime, and
+    // precursor set.  Precursors are the upstream neighbors that depend on this
+    // route and must hear about later breakage.
     pub destination: Ipv4Addr,
     pub sequence_number: u32,
     pub sequence_number_valid: bool,
@@ -87,15 +94,22 @@ pub struct RouteEntry {
 #[derive(Debug, Clone)]
 pub struct Engine {
     config: Config,
+    // Each node owns and monotonically advances its sequence number.  Incoming
+    // route information is compared against destination sequence numbers so
+    // newer information wins and loops are avoided.
     local_sequence_number: u32,
     next_rreq_id: u32,
     routes: HashMap<Ipv4Addr, RouteEntry>,
+    // RREQs are uniquely identified by originator plus RREQ ID.  Duplicates
+    // are suppressed for PATH_DISCOVERY_TIME so a flood does not loop forever.
     seen_rreqs: HashMap<(Ipv4Addr, u32), Instant>,
     pending_discoveries: HashMap<Ipv4Addr, PendingDiscovery>,
     buffered_packets: HashMap<Ipv4Addr, VecDeque<BufferedPacket>>,
     neighbors: HashMap<Ipv4Addr, NeighborState>,
     recent_rreq_emissions: VecDeque<Instant>,
     recent_rerr_emissions: VecDeque<Instant>,
+    pending_rrep_acks: HashMap<Ipv4Addr, Instant>,
+    blacklisted_neighbors: HashMap<Ipv4Addr, Instant>,
     last_broadcast_at: Option<Instant>,
 }
 
@@ -132,6 +146,8 @@ impl Engine {
             neighbors: HashMap::new(),
             recent_rreq_emissions: VecDeque::new(),
             recent_rerr_emissions: VecDeque::new(),
+            pending_rrep_acks: HashMap::new(),
+            blacklisted_neighbors: HashMap::new(),
             last_broadcast_at: None,
         }
     }
@@ -150,9 +166,18 @@ impl Engine {
             .map_or(0, VecDeque::len)
     }
 
+    pub fn is_blacklisted(&self, neighbor: Ipv4Addr, now: Instant) -> bool {
+        self.blacklisted_neighbors
+            .get(&neighbor)
+            .is_some_and(|deadline| *deadline > now)
+    }
+
     pub fn start_route_discovery(&mut self, destination: Ipv4Addr, now: Instant) -> Vec<Action> {
         self.prune_caches(now);
         if self.has_active_route(destination, now) {
+            // AODV should use an existing valid route instead of flooding a new
+            // request.  Buffered payloads can be released immediately because
+            // the next hop is already known.
             let route = self.routes.get(&destination).unwrap();
             let mut actions = vec![Action::RouteDiscovered {
                 destination,
@@ -165,6 +190,8 @@ impl Engine {
             return actions;
         }
 
+        // Route discovery begins with expanding-ring search.  The first TTL is
+        // small unless an invalid route gives us a better radius estimate.
         let ttl = self.initial_ttl_for(destination);
         let message = self.build_rreq(destination);
         self.seen_rreqs.insert(
@@ -205,6 +232,8 @@ impl Engine {
         self.buffer_packet(destination, packet);
 
         if self.pending_discoveries.contains_key(&destination) {
+            // Only the first buffered payload for a destination starts route
+            // discovery; later packets wait behind the same pending RREQ.
             return Vec::new();
         }
 
@@ -230,6 +259,8 @@ impl Engine {
         });
 
         if can_repair {
+            // Local repair lets an intermediate node try a limited-scope RREQ
+            // before it tells every precursor that the route is broken.
             return self.start_local_repair(destination, now);
         }
 
@@ -251,7 +282,10 @@ impl Engine {
             }
             Message::Rrep(message) => self.handle_rrep(packet.source, message, now),
             Message::Rerr(message) => self.handle_rerr(packet.source, message, now),
-            Message::RrepAck => Vec::new(),
+            Message::RrepAck => {
+                self.pending_rrep_acks.remove(&packet.source);
+                Vec::new()
+            }
         }
     }
 
@@ -274,7 +308,23 @@ impl Engine {
             })
             .collect();
         for neighbor in lost_neighbors {
+            // A missed HELLO window is treated as link loss for the neighbor,
+            // which in turn invalidates every active route using that next hop.
             actions.extend(self.handle_link_loss(neighbor, now));
+        }
+
+        let expired_acks: Vec<Ipv4Addr> = self
+            .pending_rrep_acks
+            .iter()
+            .filter_map(|(neighbor, deadline)| (*deadline <= now).then_some(*neighbor))
+            .collect();
+        for neighbor in expired_acks {
+            // When an RREP was sent with the acknowledgement bit set and no
+            // RREP-ACK arrives in time, the next hop is treated as unreliable
+            // and temporarily blacklisted.
+            self.pending_rrep_acks.remove(&neighbor);
+            self.blacklisted_neighbors
+                .insert(neighbor, now + self.config.blacklist_timeout());
         }
 
         let expiring: Vec<Ipv4Addr> = self
@@ -290,6 +340,9 @@ impl Engine {
             .collect();
 
         for destination in expiring {
+            // Valid routes first become invalid and remain in the table for
+            // DELETE_PERIOD, giving RERR processing and sequence-number
+            // comparison a chance to use the stale entry safely.
             if let Some(route) = self.routes.get_mut(&destination) {
                 route.state = RouteState::Invalid;
                 route.repairing = false;
@@ -324,6 +377,9 @@ impl Engine {
         }
 
         if self.should_emit_hello(now) {
+            // HELLO messages are local broadcasts derived from RREP.  They are
+            // only emitted while this node has active routes, matching the RFC
+            // intent that hello traffic tracks useful participation.
             let hello = Rrep::hello(
                 self.config.local_ip,
                 self.local_sequence_number,
@@ -355,6 +411,7 @@ impl Engine {
                 .hello_timeout
                 .map(|timeout| state.last_heard + timeout)
         }));
+        deadlines.extend(self.pending_rrep_acks.values().copied());
 
         if self.should_emit_hello(now) {
             deadlines.push(now);
@@ -377,6 +434,12 @@ impl Engine {
         now: Instant,
     ) -> Vec<Action> {
         self.ensure_neighbor_route(source, now);
+        if self.is_blacklisted(source, now) {
+            // Ignore route requests from a neighbor that failed RREP
+            // acknowledgement; this follows the unidirectional-link protection
+            // path around RREP-ACK.
+            return Vec::new();
+        }
 
         let key = (message.originator_ip, message.rreq_id);
         if self
@@ -384,6 +447,8 @@ impl Engine {
             .get(&key)
             .is_some_and(|deadline| *deadline > now)
         {
+            // The first copy of an RREQ installs reverse-route state.  Later
+            // copies with the same originator and RREQ ID are dropped.
             return Vec::new();
         }
         self.seen_rreqs
@@ -401,6 +466,8 @@ impl Engine {
                 ));
 
         self.update_route(RouteUpdate {
+            // Every forwarded RREQ leaves a reverse route toward the originator
+            // so the eventual RREP can travel back by unicast.
             destination: message.originator_ip,
             next_hop: source,
             sequence_number: Some(message.originator_sequence_number),
@@ -412,10 +479,14 @@ impl Engine {
         });
 
         if message.destination_ip == self.config.local_ip {
-            return self.reply_as_destination(&message);
+            // We are the destination requested by the RREQ, so produce a RREP
+            // with this node's freshest destination sequence number.
+            return self.reply_as_destination(&message, now);
         }
 
         if let Some(actions) = self.reply_as_intermediate(source, &message, now) {
+            // An intermediate node may answer only if it has a valid route with
+            // a destination sequence number at least as fresh as the RREQ asks.
             return actions;
         }
 
@@ -436,7 +507,10 @@ impl Engine {
         vec![self.broadcast_action(Message::Rreq(message), inbound_ttl.saturating_sub(1), now)]
     }
 
-    fn reply_as_destination(&mut self, message: &Rreq) -> Vec<Action> {
+    fn reply_as_destination(&mut self, message: &Rreq, now: Instant) -> Vec<Action> {
+        // Before answering, the destination raises its own sequence number to
+        // be newer than or equal to the value in the RREQ; if equal, it bumps
+        // once more so the reply is unambiguously fresh.
         self.local_sequence_number = self
             .local_sequence_number
             .max(message.destination_sequence_number);
@@ -461,11 +535,7 @@ impl Engine {
             hello_interval_ms: None,
         };
 
-        vec![self.unicast_action(
-            reverse_route.next_hop,
-            Message::Rrep(reply),
-            self.config.net_diameter,
-        )]
+        vec![self.rrep_unicast_action(reverse_route.next_hop, reply, self.config.net_diameter, now)]
     }
 
     fn reply_as_intermediate(
@@ -493,6 +563,9 @@ impl Engine {
             .as_millis() as u32;
 
         if let Some(route) = self.routes.get_mut(&message.destination_ip) {
+            // Precursor links are learned when forwarding replies: the source
+            // of the RREQ depends on our route to the destination, and the next
+            // hop toward the destination depends on our reverse route.
             route.precursors.insert(source);
         }
         if let Some(route) = self.routes.get_mut(&message.originator_ip) {
@@ -511,13 +584,16 @@ impl Engine {
             hello_interval_ms: None,
         };
 
-        let mut actions = vec![self.unicast_action(
+        let mut actions = vec![self.rrep_unicast_action(
             reverse_route.next_hop,
-            Message::Rrep(reply),
+            reply,
             self.config.net_diameter,
+            now,
         )];
 
         if message.gratuitous_rrep {
+            // A gratuitous RREP teaches the destination how to reach the
+            // originator early, reducing the chance of asymmetric route state.
             let gratuitous = Rrep {
                 repair: false,
                 acknowledgement_required: false,
@@ -532,10 +608,11 @@ impl Engine {
                     .as_millis() as u32,
                 hello_interval_ms: None,
             };
-            actions.push(self.unicast_action(
+            actions.push(self.rrep_unicast_action(
                 forward_route.next_hop,
-                Message::Rrep(gratuitous),
+                gratuitous,
                 self.config.net_diameter,
+                now,
             ));
         }
 
@@ -544,9 +621,18 @@ impl Engine {
 
     fn handle_rrep(&mut self, source: Ipv4Addr, mut message: Rrep, now: Instant) -> Vec<Action> {
         self.ensure_neighbor_route(source, now);
+        let mut actions = Vec::new();
+        if message.acknowledgement_required {
+            // The RREP A bit asks the receiver to immediately return RREP-ACK
+            // over one hop, proving that the reverse link works.
+            actions.push(self.unicast_action(source, Message::RrepAck, 1));
+            message.acknowledgement_required = false;
+        }
 
         let new_hop_count = message.hop_count.saturating_add(1);
         let route_updated = self.update_route(RouteUpdate {
+            // RREP installs or refreshes the forward route to the destination
+            // named in the reply.  The hop count includes this one-hop sender.
             destination: message.destination_ip,
             next_hop: source,
             sequence_number: Some(message.destination_sequence_number),
@@ -558,13 +644,12 @@ impl Engine {
         });
 
         if !route_updated {
-            return Vec::new();
+            return actions;
         }
 
         if message.originator_ip == self.config.local_ip {
             let pending = self.pending_discoveries.remove(&message.destination_ip);
             let route = self.routes.get(&message.destination_ip).unwrap();
-            let mut actions = Vec::new();
 
             if let Some(PendingDiscovery {
                 kind: PendingKind::LocalRepair { previous_hop_count },
@@ -572,6 +657,8 @@ impl Engine {
             }) = pending
                 && route.hop_count > previous_hop_count
             {
+                // If local repair found a longer route, upstream precursors get
+                // a no-delete RERR so they can invalidate cautiously.
                 actions.extend(self.build_repaired_route_notice(message.destination_ip));
             }
 
@@ -588,6 +675,9 @@ impl Engine {
 
         let reverse_route = match self.routes.get_mut(&message.originator_ip) {
             Some(route) if route.state == RouteState::Valid => {
+                // Intermediate RREP forwarding refreshes the reverse route to
+                // the originator because that path is actively carrying control
+                // traffic.
                 route.lifetime = route.lifetime.max(now + self.config.active_route_timeout);
                 route.clone()
             }
@@ -602,14 +692,19 @@ impl Engine {
         }
 
         message.hop_count = new_hop_count;
-        vec![self.unicast_action(
+        actions.push(self.rrep_unicast_action(
             reverse_route.next_hop,
-            Message::Rrep(message),
+            message,
             self.config.net_diameter,
-        )]
+            now,
+        ));
+        actions
     }
 
     fn handle_hello(&mut self, source: Ipv4Addr, message: Rrep, now: Instant) -> Vec<Action> {
+        // A HELLO proves one-hop connectivity and creates a neighbor route with
+        // lifetime ALLOWED_HELLO_LOSS * HELLO_INTERVAL, or the advertised hello
+        // extension when present.
         self.note_neighbor_contact(
             source,
             now,
@@ -637,6 +732,8 @@ impl Engine {
                 continue;
             };
             if route.next_hop != source || route.state != RouteState::Valid {
+                // A RERR is only authoritative for routes that actually use
+                // the sender as next hop; unrelated error reports are ignored.
                 continue;
             }
 
@@ -661,6 +758,8 @@ impl Engine {
             return Vec::new();
         }
 
+        // Forward the RERR only to precursors that could have been using the
+        // invalidated routes through this node.
         let rerr = Rerr {
             no_delete: message.no_delete,
             unreachable_destinations: affected,
@@ -678,6 +777,8 @@ impl Engine {
         };
 
         if matches!(pending.kind, PendingKind::LocalRepair { .. }) {
+            // Local repair gets one scoped attempt.  If it times out, the route
+            // is invalidated and any buffered payloads are dropped.
             self.pending_discoveries.remove(&destination);
             let next_hop = self
                 .routes
@@ -692,6 +793,8 @@ impl Engine {
             return actions;
         }
 
+        // Expanding-ring search increases TTL up to the threshold, then falls
+        // back to NET_DIAMETER and binary exponential timeout.
         let (next_ttl, retries_at_net_diameter) = if pending.last_ttl < self.config.ttl_threshold {
             let incremented = pending.last_ttl.saturating_add(self.config.ttl_increment);
             if incremented >= self.config.ttl_threshold {
@@ -743,6 +846,9 @@ impl Engine {
             .values_mut()
             .filter(|route| route.state == RouteState::Valid && route.next_hop == next_hop)
         {
+            // On link break, every valid route using that next hop is marked
+            // invalid and its sequence number is advanced before precursors are
+            // told.  This prevents stale information from looking fresh later.
             if route.sequence_number_valid {
                 route.sequence_number = route.sequence_number.wrapping_add(1);
             }
@@ -779,6 +885,9 @@ impl Engine {
     fn update_route(&mut self, update: RouteUpdate) -> bool {
         match self.routes.get_mut(&update.destination) {
             Some(existing) => {
+                // RFC route replacement prefers valid information with the
+                // freshest destination sequence number, and for equal sequence
+                // numbers the shorter hop count.
                 if !should_update_route(existing, &update) {
                     return false;
                 }
@@ -897,6 +1006,19 @@ impl Engine {
             ttl,
             message,
         })
+    }
+
+    fn rrep_unicast_action(
+        &mut self,
+        target: Ipv4Addr,
+        mut message: Rrep,
+        ttl: u8,
+        now: Instant,
+    ) -> Action {
+        message.acknowledgement_required = true;
+        self.pending_rrep_acks
+            .insert(target, now + self.config.next_hop_wait());
+        self.unicast_action(target, Message::Rrep(message), ttl)
     }
 
     fn broadcast_action(&mut self, message: Message, ttl: u8, now: Instant) -> Action {
@@ -1040,6 +1162,8 @@ impl Engine {
             (
                 previous_hop_count,
                 route.next_hop,
+                // This userspace daemon approximates the RFC repair radius by
+                // using the known destination hop count plus LOCAL_ADD_TTL.
                 route.hop_count.saturating_add(self.config.local_add_ttl),
             )
         };
@@ -1164,6 +1288,8 @@ impl Engine {
 
     fn prune_caches(&mut self, now: Instant) {
         self.seen_rreqs.retain(|_, deadline| *deadline > now);
+        self.blacklisted_neighbors
+            .retain(|_, deadline| *deadline > now);
         prune_rate_limiter(&mut self.recent_rreq_emissions, now);
         prune_rate_limiter(&mut self.recent_rerr_emissions, now);
     }
@@ -1231,6 +1357,8 @@ mod tests {
         }
     }
 
+    // Covers initial route discovery: no valid route exists, so the engine
+    // emits a TTL-limited RREQ and records pending discovery state.
     #[test]
     fn route_discovery_emits_rreq_and_tracks_pending_state() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1253,6 +1381,8 @@ mod tests {
         assert!(engine.pending_discoveries.contains_key(&destination));
     }
 
+    // Covers duplicate RREQ suppression by originator plus RREQ ID, preventing
+    // the same flood from being processed twice inside PATH_DISCOVERY_TIME.
     #[test]
     fn duplicate_rreq_is_suppressed() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 2);
@@ -1285,6 +1415,8 @@ mod tests {
         assert!(second.is_empty());
     }
 
+    // Covers the destination-node reply path: an RREQ for our local IP creates
+    // a unicast RREP back along the reverse route.
     #[test]
     fn destination_generates_rrep_for_rreq() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 5);
@@ -1325,6 +1457,8 @@ mod tests {
         assert_eq!(rrep.originator_ip, source);
     }
 
+    // Covers the intermediate-node reply path, where a fresh enough route can
+    // answer an RREQ without forwarding the request to the final destination.
     #[test]
     fn intermediate_route_generates_rrep() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 2);
@@ -1377,6 +1511,8 @@ mod tests {
         assert_eq!(rrep.destination_sequence_number, 7);
     }
 
+    // Covers RREP handling at the originator: the pending discovery is resolved
+    // and the discovered next hop is surfaced to the daemon.
     #[test]
     fn incoming_rrep_resolves_pending_discovery() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1417,6 +1553,8 @@ mod tests {
         ));
     }
 
+    // Covers HELLO processing, including creation of a one-hop neighbor route
+    // marked as liveness-derived instead of discovered by RREQ/RREP.
     #[test]
     fn hello_refreshes_neighbor_route() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 4);
@@ -1441,6 +1579,8 @@ mod tests {
         assert!(route.created_by_hello);
     }
 
+    // Covers link-loss invalidation and RERR generation toward precursors that
+    // were depending on the broken next hop.
     #[test]
     fn link_loss_generates_rerr() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 7);
@@ -1482,6 +1622,8 @@ mod tests {
         );
     }
 
+    // Covers payload buffering while discovery is pending and flushing that
+    // buffered packet once an RREP installs a route.
     #[test]
     fn submit_data_packet_buffers_until_route_is_discovered() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1535,6 +1677,8 @@ mod tests {
         assert_eq!(engine.buffered_packet_count(destination), 0);
     }
 
+    // Covers the failure path for buffered payloads when expanding-ring search
+    // exhausts retries without discovering a route.
     #[test]
     fn buffered_packets_are_dropped_after_discovery_failure() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1575,6 +1719,8 @@ mod tests {
         )));
     }
 
+    // Covers forwarding failure on an active route: the engine starts local
+    // repair and keeps the failed payload buffered behind the repair attempt.
     #[test]
     fn forwarding_failure_starts_local_repair_and_buffers_packet() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1622,6 +1768,8 @@ mod tests {
         assert!(engine.route(destination).unwrap().repairing);
     }
 
+    // Covers successful local repair: the replacement RREP clears the repair
+    // state and releases buffered packets through the new next hop.
     #[test]
     fn successful_local_repair_flushes_buffered_packets() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1684,6 +1832,8 @@ mod tests {
         assert!(!engine.route(destination).unwrap().repairing);
     }
 
+    // Covers failed local repair: the scoped repair attempt times out, the
+    // route is invalidated, and waiting payloads are dropped.
     #[test]
     fn failed_local_repair_drops_buffered_packets() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1730,6 +1880,8 @@ mod tests {
         assert_eq!(engine.buffered_packet_count(destination), 0);
     }
 
+    // Covers the no-delete RERR required when local repair succeeds but the
+    // repaired route is longer than the previous route.
     #[test]
     fn longer_repaired_route_triggers_no_delete_rerr() {
         let local_ip = Ipv4Addr::new(10, 0, 0, 1);
@@ -1783,5 +1935,92 @@ mod tests {
                 ..
             }) if rerr.no_delete
         )));
+    }
+
+    // Covers the RREP acknowledgement bit: the receiver returns a one-hop
+    // RREP-ACK while still installing the route from the RREP.
+    #[test]
+    fn rrep_acknowledgement_is_sent_when_required() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let source = Ipv4Addr::new(10, 0, 0, 2);
+        let destination = Ipv4Addr::new(10, 0, 0, 9);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        engine.start_route_discovery(destination, now);
+        let actions = engine.handle_incoming(
+            IncomingPacket {
+                source,
+                ttl: Some(4),
+                message: Message::Rrep(Rrep {
+                    repair: false,
+                    acknowledgement_required: true,
+                    prefix_size: 0,
+                    hop_count: 0,
+                    destination_ip: destination,
+                    destination_sequence_number: 5,
+                    originator_ip: local_ip,
+                    lifetime_ms: 5_000,
+                    hello_interval_ms: None,
+                }),
+            },
+            now + Duration::from_millis(10),
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Send(SendAction {
+                target: SendTarget::Unicast(target),
+                message: Message::RrepAck,
+                ttl: 1,
+            }) if *target == source
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::RouteDiscovered { destination: d, .. } if *d == destination
+        )));
+    }
+
+    // Covers unidirectional-link protection: a missing RREP-ACK causes the
+    // neighbor to be blacklisted after NEXT_HOP_WAIT expires.
+    #[test]
+    fn missing_rrep_ack_blacklists_neighbor() {
+        let local_ip = Ipv4Addr::new(10, 0, 0, 5);
+        let source = Ipv4Addr::new(10, 0, 0, 1);
+        let now = Instant::now();
+        let mut engine = Engine::new(test_config(local_ip));
+
+        let actions = engine.handle_incoming(
+            IncomingPacket {
+                source,
+                ttl: Some(5),
+                message: Message::Rreq(Rreq {
+                    join: false,
+                    repair: false,
+                    gratuitous_rrep: false,
+                    destination_only: false,
+                    unknown_sequence_number: true,
+                    hop_count: 0,
+                    rreq_id: 1,
+                    destination_ip: local_ip,
+                    destination_sequence_number: 0,
+                    originator_ip: source,
+                    originator_sequence_number: 2,
+                }),
+            },
+            now,
+        );
+
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Send(SendAction {
+                target: SendTarget::Unicast(target),
+                message: Message::Rrep(rrep),
+                ..
+            }) if *target == source && rrep.acknowledgement_required
+        )));
+
+        engine.tick(now + engine.config().next_hop_wait() + Duration::from_millis(1));
+        assert!(engine.is_blacklisted(source, now + Duration::from_millis(100)));
     }
 }

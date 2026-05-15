@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
-use aodv::{Action, Config, Engine, IncomingPacket, Message, RouteState, SendAction, SendTarget};
+use aodv::{
+    Action, BufferedPacket, Config, Engine, IncomingPacket, Message, RouteState, SendAction,
+    SendTarget,
+};
 
 #[derive(Debug)]
 struct SimNode {
@@ -18,12 +21,41 @@ struct ScheduledDelivery {
     message: Message,
 }
 
+#[derive(Debug, Clone)]
+struct ScheduledDataDelivery {
+    at: Instant,
+    from: Ipv4Addr,
+    to: Ipv4Addr,
+    destination: Ipv4Addr,
+    packet: BufferedPacket,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeliveredPacket {
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    payload: Vec<u8>,
+    path: Vec<Ipv4Addr>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DueEvent {
+    Control(usize),
+    Data(usize),
+    Tick(Ipv4Addr),
+}
+
 #[derive(Debug)]
 struct SimNetwork {
     now: Instant,
     nodes: BTreeMap<Ipv4Addr, SimNode>,
     links: BTreeMap<Ipv4Addr, BTreeSet<Ipv4Addr>>,
     deliveries: Vec<ScheduledDelivery>,
+    data_deliveries: Vec<ScheduledDataDelivery>,
+    delivered_packets: Vec<DeliveredPacket>,
+    packet_sources: BTreeMap<u64, Ipv4Addr>,
+    packet_paths: BTreeMap<u64, Vec<Ipv4Addr>>,
+    next_packet_id: u64,
     action_log: Vec<(Ipv4Addr, Action)>,
 }
 
@@ -34,6 +66,11 @@ impl SimNetwork {
             nodes: BTreeMap::new(),
             links: BTreeMap::new(),
             deliveries: Vec::new(),
+            data_deliveries: Vec::new(),
+            delivered_packets: Vec::new(),
+            packet_sources: BTreeMap::new(),
+            packet_paths: BTreeMap::new(),
+            next_packet_id: 1,
             action_log: Vec::new(),
         }
     }
@@ -77,6 +114,22 @@ impl SimNetwork {
         self.process_actions(from, actions);
     }
 
+    fn send_payload(&mut self, from: Ipv4Addr, destination: Ipv4Addr, payload: Vec<u8>) -> u64 {
+        let id = self.next_packet_id;
+        self.next_packet_id += 1;
+        self.packet_sources.insert(id, from);
+        self.packet_paths.insert(id, vec![from]);
+
+        let now = self.now;
+        let actions = self.node_mut(from).submit_data_packet(
+            destination,
+            BufferedPacket { id, payload },
+            now,
+        );
+        self.process_actions(from, actions);
+        id
+    }
+
     fn handle_link_loss(&mut self, at: Ipv4Addr, lost_next_hop: Ipv4Addr) {
         let now = self.now;
         let actions = self.node_mut(at).handle_link_loss(lost_next_hop, now);
@@ -112,13 +165,21 @@ impl SimNetwork {
     }
 
     fn step_until(&mut self, limit: Instant) -> bool {
-        let next_delivery_index = self
+        let next_control = self
             .deliveries
             .iter()
             .enumerate()
             .filter(|(_, delivery)| delivery.at <= limit)
             .min_by_key(|(_, delivery)| delivery.at)
-            .map(|(index, _)| index);
+            .map(|(index, delivery)| (delivery.at, DueEvent::Control(index)));
+
+        let next_data = self
+            .data_deliveries
+            .iter()
+            .enumerate()
+            .filter(|(_, delivery)| delivery.at <= limit)
+            .min_by_key(|(_, delivery)| delivery.at)
+            .map(|(index, delivery)| (delivery.at, DueEvent::Data(index)));
 
         let next_tick = self
             .nodes
@@ -129,23 +190,27 @@ impl SimNetwork {
                     .map(|deadline| (*ip, deadline))
             })
             .filter(|(_, deadline)| *deadline <= limit)
-            .min_by_key(|(_, deadline)| *deadline);
+            .min_by_key(|(_, deadline)| *deadline)
+            .map(|(ip, deadline)| (deadline, DueEvent::Tick(ip)));
 
-        match (next_delivery_index, next_tick) {
-            (None, None) => false,
-            (Some(index), Some((_, deadline))) => {
-                if self.deliveries[index].at <= deadline {
-                    self.process_delivery(index);
-                } else {
-                    self.process_tick(next_tick.unwrap().0, deadline);
-                }
-                true
+        let mut next = next_control;
+        for candidate in [next_data, next_tick].into_iter().flatten() {
+            if next.is_none_or(|(at, _)| candidate.0 < at) {
+                next = Some(candidate);
             }
-            (Some(index), None) => {
+        }
+
+        match next {
+            None => false,
+            Some((_, DueEvent::Control(index))) => {
                 self.process_delivery(index);
                 true
             }
-            (None, Some((ip, deadline))) => {
+            Some((_, DueEvent::Data(index))) => {
+                self.process_data_delivery(index);
+                true
+            }
+            Some((deadline, DueEvent::Tick(ip))) => {
                 self.process_tick(ip, deadline);
                 true
             }
@@ -163,6 +228,19 @@ impl SimNetwork {
 
         if let Some(index) = next_delivery_index {
             self.process_delivery(index);
+            return true;
+        }
+
+        let next_data_delivery_index = self
+            .data_deliveries
+            .iter()
+            .enumerate()
+            .filter(|(_, delivery)| delivery.at <= self.now)
+            .min_by_key(|(_, delivery)| delivery.at)
+            .map(|(index, _)| index);
+
+        if let Some(index) = next_data_delivery_index {
+            self.process_data_delivery(index);
             return true;
         }
 
@@ -223,11 +301,75 @@ impl SimNetwork {
         self.process_actions(delivery.to, actions);
     }
 
+    fn process_data_delivery(&mut self, index: usize) {
+        let delivery = self.data_deliveries.remove(index);
+        self.now = delivery.at;
+        let path = self.packet_paths.entry(delivery.packet.id).or_default();
+        if path.last().copied() != Some(delivery.to) {
+            path.push(delivery.to);
+        }
+
+        if delivery.to == delivery.destination {
+            let source = self
+                .packet_sources
+                .remove(&delivery.packet.id)
+                .unwrap_or(delivery.from);
+            let path = self
+                .packet_paths
+                .remove(&delivery.packet.id)
+                .unwrap_or_else(|| vec![source, delivery.to]);
+            self.delivered_packets.push(DeliveredPacket {
+                source,
+                destination: delivery.destination,
+                payload: delivery.packet.payload,
+                path,
+            });
+            return;
+        }
+
+        self.forward_payload(delivery.to, delivery.destination, delivery.packet);
+    }
+
+    fn forward_payload(
+        &mut self,
+        current: Ipv4Addr,
+        destination: Ipv4Addr,
+        packet: BufferedPacket,
+    ) {
+        let route = self.node(current).route(destination).cloned();
+        let Some(route) = route.filter(|route| route.state == RouteState::Valid) else {
+            let now = self.now;
+            let actions = self
+                .node_mut(current)
+                .submit_data_packet(destination, packet, now);
+            self.process_actions(current, actions);
+            return;
+        };
+
+        self.schedule_data_send(current, destination, route.next_hop, packet);
+    }
+
     fn process_actions(&mut self, from: Ipv4Addr, actions: Vec<Action>) {
         for action in actions {
             self.action_log.push((from, action.clone()));
-            if let Action::Send(send) = action {
-                self.schedule_send(from, send);
+            match action {
+                Action::Send(send) => self.schedule_send(from, send),
+                Action::ForwardBufferedPackets {
+                    destination,
+                    next_hop,
+                    packets,
+                } => {
+                    for packet in packets {
+                        self.schedule_data_send(from, destination, next_hop, packet);
+                    }
+                }
+                Action::DropBufferedPackets { packets, .. } => {
+                    for packet in packets {
+                        self.packet_sources.remove(&packet.id);
+                        self.packet_paths.remove(&packet.id);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -258,6 +400,31 @@ impl SimNetwork {
                 message: send.message.clone(),
             });
         }
+    }
+
+    fn schedule_data_send(
+        &mut self,
+        from: Ipv4Addr,
+        destination: Ipv4Addr,
+        next_hop: Ipv4Addr,
+        packet: BufferedPacket,
+    ) {
+        if self.is_linked(from, next_hop) {
+            self.data_deliveries.push(ScheduledDataDelivery {
+                at: self.now,
+                from,
+                to: next_hop,
+                destination,
+                packet,
+            });
+            return;
+        }
+
+        let now = self.now;
+        let actions =
+            self.node_mut(from)
+                .handle_forwarding_failure(destination, next_hop, Some(packet), now);
+        self.process_actions(from, actions);
     }
 
     fn is_linked(&self, a: Ipv4Addr, b: Ipv4Addr) -> bool {
@@ -304,6 +471,86 @@ fn line_topology_discovers_multihop_route() {
     assert_eq!(route.state, RouteState::Valid);
     assert_eq!(route.next_hop, ip(2));
     assert_eq!(route.hop_count, 3);
+}
+
+#[test]
+fn payload_sent_before_route_exists_is_delivered_after_discovery() {
+    let mut network = SimNetwork::new();
+    for node in [ip(1), ip(2), ip(3), ip(4)] {
+        network.add_node(node);
+    }
+    network.link(ip(1), ip(2));
+    network.link(ip(2), ip(3));
+    network.link(ip(3), ip(4));
+
+    network.send_payload(ip(1), ip(4), b"hello".to_vec());
+    network.advance_by(Duration::from_millis(300));
+
+    assert_eq!(
+        network.delivered_packets,
+        vec![DeliveredPacket {
+            source: ip(1),
+            destination: ip(4),
+            payload: b"hello".to_vec(),
+            path: vec![ip(1), ip(2), ip(3), ip(4)],
+        }]
+    );
+    let route = network.node(ip(1)).route(ip(4)).unwrap();
+    assert_eq!(route.state, RouteState::Valid);
+    assert_eq!(route.next_hop, ip(2));
+    assert_eq!(route.hop_count, 3);
+}
+
+#[test]
+fn payload_uses_existing_route_without_new_discovery() {
+    let mut network = SimNetwork::new();
+    for node in [ip(1), ip(2), ip(3), ip(4)] {
+        network.add_node(node);
+    }
+    network.link(ip(1), ip(2));
+    network.link(ip(2), ip(3));
+    network.link(ip(3), ip(4));
+
+    network.start_discovery(ip(1), ip(4));
+    network.advance_by(Duration::from_millis(300));
+    network.action_log.clear();
+
+    network.send_payload(ip(1), ip(4), b"already-routed".to_vec());
+    network.run_until_idle(64);
+
+    assert_eq!(
+        network.delivered_packets,
+        vec![DeliveredPacket {
+            source: ip(1),
+            destination: ip(4),
+            payload: b"already-routed".to_vec(),
+            path: vec![ip(1), ip(2), ip(3), ip(4)],
+        }]
+    );
+    let new_rreq_count = network
+        .count_send_actions(|node, send| node == ip(1) && matches!(send.message, Message::Rreq(_)));
+    assert_eq!(new_rreq_count, 0);
+}
+
+#[test]
+fn payload_is_not_delivered_when_destination_unreachable() {
+    let mut network = SimNetwork::new();
+    network.add_node(ip(1));
+    network.add_node(ip(2));
+
+    network.send_payload(ip(1), ip(2), b"undeliverable".to_vec());
+    network.advance_by(Duration::from_secs(20));
+
+    assert!(network.delivered_packets.is_empty());
+    assert!(network.action_log.iter().any(|(node, action)| {
+        *node == ip(1)
+            && matches!(
+                action,
+                Action::DropBufferedPackets { destination, .. }
+                    | Action::RouteDiscoveryFailed { destination }
+                    if *destination == ip(2)
+            )
+    }));
 }
 
 #[test]

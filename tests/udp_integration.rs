@@ -221,6 +221,9 @@ fn ip(last: u8) -> Ipv4Addr {
     Ipv4Addr::new(10, 0, 0, last)
 }
 
+// Real UDP smoke test for multihop discovery.  The mesh harness sends encoded
+// AODV datagrams over loopback sockets while the test-controlled links decide
+// which virtual neighbors receive each packet.
 #[tokio::test]
 async fn udp_mesh_discovers_multihop_route() -> io::Result<()> {
     let mut mesh = UdpMesh::new(&[ip(1), ip(2), ip(3)]).await?;
@@ -237,6 +240,8 @@ async fn udp_mesh_discovers_multihop_route() -> io::Result<()> {
     Ok(())
 }
 
+// Real UDP smoke test for RERR propagation after a link break, proving the
+// socket harness and engine agree on invalidating a discovered route.
 #[tokio::test]
 async fn udp_mesh_propagates_rerr_after_link_break() -> io::Result<()> {
     let mut mesh = UdpMesh::new(&[ip(1), ip(2), ip(3)]).await?;
@@ -255,6 +260,8 @@ async fn udp_mesh_propagates_rerr_after_link_break() -> io::Result<()> {
     Ok(())
 }
 
+// Real UDP smoke test for rediscovery over an alternate branch after the first
+// discovered route is invalidated.
 #[tokio::test]
 async fn udp_mesh_rediscovery_finds_alternate_path() -> io::Result<()> {
     let mut mesh = UdpMesh::new(&[ip(1), ip(2), ip(3), ip(4)]).await?;

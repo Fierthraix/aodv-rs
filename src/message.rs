@@ -5,6 +5,9 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
+    // RFC 3561 defines four control messages on the AODV UDP port.  Data
+    // packets are not represented here; they move through the daemon data
+    // plane once the engine has produced a next hop.
     Rreq(Rreq),
     Rrep(Rrep),
     Rerr(Rerr),
@@ -13,6 +16,9 @@ pub enum Message {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rreq {
+    // RREQ flags come from the second octet of the wire format.  The J flag is
+    // parsed for protocol completeness, but multicast tree joins are not part
+    // of this daemon's supported routing modes.
     pub join: bool,
     pub repair: bool,
     pub gratuitous_rrep: bool,
@@ -28,6 +34,9 @@ pub struct Rreq {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rrep {
+    // A RREP carries the destination sequence number and lifetime that make the
+    // forward route usable.  A hello is encoded as a one-hop RREP whose
+    // destination and originator are both the sender.
     pub repair: bool,
     pub acknowledgement_required: bool,
     pub prefix_size: u8,
@@ -41,6 +50,9 @@ pub struct Rrep {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rerr {
+    // One RERR may report several destinations that became unreachable through
+    // the same broken next hop.  The no-delete bit is used by local repair to
+    // tell upstream nodes to keep stale state briefly instead of purging it.
     pub no_delete: bool,
     pub unreachable_destinations: Vec<UnreachableDestination>,
 }
@@ -67,6 +79,9 @@ impl Message {
     pub fn decode(bytes: &[u8]) -> Result<Self, MessageError> {
         let message_type = *bytes.first().ok_or(MessageError::Empty)?;
         match message_type {
+            // Fixed-size messages are rejected if their datagram length does
+            // not match the RFC layout.  RREP accepts trailing extensions,
+            // currently only the hello interval extension.
             1 if bytes.len() == 24 => Ok(Self::Rreq(Rreq::decode(bytes))),
             2 if bytes.len() >= 20 => Ok(Self::Rrep(Rrep::decode(bytes)?)),
             3 if bytes.len() >= 12 && (bytes.len() - 4).is_multiple_of(8) => {
@@ -204,6 +219,9 @@ impl Rrep {
     }
 
     pub fn is_hello(&self, sender: Ipv4Addr, ttl: Option<u8>) -> bool {
+        // HELLO messages are ordinary RREPs sent with TTL=1 by the node that
+        // owns the advertised route.  Requiring all three properties keeps a
+        // forwarded RREP from being mistaken for neighbor liveness.
         self.hop_count == 0
             && self.destination_ip == sender
             && self.originator_ip == sender
@@ -274,6 +292,8 @@ fn read_ipv4(bytes: &[u8]) -> Ipv4Addr {
 mod tests {
     use super::*;
 
+    // Verifies the RREQ flag bits, fixed 24-byte layout, IP fields, and
+    // big-endian sequence-number encoding round-trip through the codec.
     #[test]
     fn rreq_round_trip() {
         let rreq = Rreq {
@@ -301,6 +321,8 @@ mod tests {
         assert_eq!(Message::decode(&bytes).unwrap(), Message::Rreq(rreq));
     }
 
+    // Verifies RREP parsing with the optional hello interval extension, which
+    // the daemon uses to derive neighbor liveness timeouts.
     #[test]
     fn rrep_round_trip_with_hello_extension() {
         let rrep = Rrep {
@@ -320,6 +342,8 @@ mod tests {
         assert_eq!(Message::decode(&bytes).unwrap(), Message::Rrep(rrep));
     }
 
+    // Verifies RERR encoding for multiple unreachable destinations in one
+    // packet, matching the precursor fanout path used after link breaks.
     #[test]
     fn rerr_round_trip() {
         let rerr = Rerr {

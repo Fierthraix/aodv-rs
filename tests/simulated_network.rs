@@ -454,6 +454,8 @@ fn ip(last: u8) -> Ipv4Addr {
     Ipv4Addr::new(10, 0, 0, last)
 }
 
+// Verifies RREQ/RREP propagation across a simple chain and checks that the
+// originator installs the first hop and total hop count for a multihop route.
 #[test]
 fn line_topology_discovers_multihop_route() {
     let mut network = SimNetwork::new();
@@ -473,6 +475,8 @@ fn line_topology_discovers_multihop_route() {
     assert_eq!(route.hop_count, 3);
 }
 
+// Verifies the engine buffers payloads while discovery is in flight, then
+// delivers the original payload once the route has been learned.
 #[test]
 fn payload_sent_before_route_exists_is_delivered_after_discovery() {
     let mut network = SimNetwork::new();
@@ -501,6 +505,8 @@ fn payload_sent_before_route_exists_is_delivered_after_discovery() {
     assert_eq!(route.hop_count, 3);
 }
 
+// Verifies an already-known valid route forwards payloads immediately without
+// starting another RREQ flood.
 #[test]
 fn payload_uses_existing_route_without_new_discovery() {
     let mut network = SimNetwork::new();
@@ -532,6 +538,8 @@ fn payload_uses_existing_route_without_new_discovery() {
     assert_eq!(new_rreq_count, 0);
 }
 
+// Verifies unreachable destinations eventually fail discovery and drop buffered
+// payloads instead of keeping them forever.
 #[test]
 fn payload_is_not_delivered_when_destination_unreachable() {
     let mut network = SimNetwork::new();
@@ -553,6 +561,8 @@ fn payload_is_not_delivered_when_destination_unreachable() {
     }));
 }
 
+// Verifies a buffered payload can still be delivered when topology changes make
+// the destination reachable before discovery retries are exhausted.
 #[test]
 fn buffered_payload_is_delivered_after_topology_connects() {
     let mut network = SimNetwork::new();
@@ -582,6 +592,8 @@ fn buffered_payload_is_delivered_after_topology_connects() {
     assert_eq!(route.next_hop, ip(2));
 }
 
+// Verifies payload forwarding after a primary path break: RERR invalidates the
+// old route and rediscovery finds the alternate branch.
 #[test]
 fn payload_rediscovery_uses_alternate_path_after_topology_break() {
     let mut network = SimNetwork::new();
@@ -639,6 +651,8 @@ fn payload_rediscovery_uses_alternate_path_after_topology_break() {
     assert_eq!(route.next_hop, ip(3));
 }
 
+// Verifies the destination learns a reverse route to the originator while
+// processing the incoming RREQ.
 #[test]
 fn destination_learns_reverse_route_from_discovery() {
     let mut network = SimNetwork::new();
@@ -657,6 +671,8 @@ fn destination_learns_reverse_route_from_discovery() {
     assert_eq!(route.hop_count, 2);
 }
 
+// Verifies pure route discovery failure without payload buffering still emits a
+// RouteDiscoveryFailed action at the originator.
 #[test]
 fn disconnected_network_eventually_fails_route_discovery() {
     let mut network = SimNetwork::new();
@@ -676,6 +692,8 @@ fn disconnected_network_eventually_fails_route_discovery() {
     }));
 }
 
+// Verifies discovery retries are useful: a route can succeed after a new link
+// appears between the first RREQ and later retry.
 #[test]
 fn retry_succeeds_after_link_is_added() {
     let mut network = SimNetwork::new();
@@ -694,6 +712,8 @@ fn retry_succeeds_after_link_is_added() {
     assert_eq!(route.next_hop, ip(2));
 }
 
+// Verifies RERR propagation from the node adjacent to a broken link back to the
+// route originator that had the broken next hop as a dependency.
 #[test]
 fn link_break_propagates_rerr_to_originator() {
     let mut network = SimNetwork::new();
@@ -714,6 +734,8 @@ fn link_break_propagates_rerr_to_originator() {
     assert_eq!(route.state, RouteState::Invalid);
 }
 
+// Verifies periodic HELLO traffic refreshes neighbor-derived routes beyond
+// ACTIVE_ROUTE_TIMEOUT while the link remains present.
 #[test]
 fn hello_messages_keep_routes_alive_past_active_route_timeout() {
     let mut network = SimNetwork::new();
@@ -729,6 +751,8 @@ fn hello_messages_keep_routes_alive_past_active_route_timeout() {
     assert_eq!(route.state, RouteState::Valid);
 }
 
+// Verifies missed HELLOs after a partition invalidate the neighbor route once
+// the allowed loss window expires.
 #[test]
 fn hello_timeout_invalidates_routes_after_partition() {
     let mut network = SimNetwork::new();
@@ -746,6 +770,8 @@ fn hello_timeout_invalidates_routes_after_partition() {
     assert_eq!(route.state, RouteState::Invalid);
 }
 
+// Verifies duplicate RREQ suppression in a diamond topology: the destination
+// sees two paths for one RREQ ID but answers only once.
 #[test]
 fn diamond_topology_suppresses_duplicate_rreq_processing_at_destination() {
     let mut network = SimNetwork::new();
@@ -770,6 +796,8 @@ fn diamond_topology_suppresses_duplicate_rreq_processing_at_destination() {
     assert_eq!(rrep_count, 1);
 }
 
+// Verifies expanding-ring search TTLs increase from TTL_START through
+// TTL_THRESHOLD and then use NET_DIAMETER retries.
 #[test]
 fn expanding_ring_search_increases_ttl_across_retries() {
     let mut network = SimNetwork::new();
@@ -792,6 +820,8 @@ fn expanding_ring_search_increases_ttl_across_retries() {
     assert_eq!(ttls, vec![1, 3, 10, 10, 10]);
 }
 
+// Verifies rediscovery alone can replace an invalidated primary route with an
+// alternate next hop after the original branch breaks.
 #[test]
 fn rediscovery_uses_alternate_path_after_primary_break() {
     let mut network = SimNetwork::new();
@@ -818,6 +848,8 @@ fn rediscovery_uses_alternate_path_after_primary_break() {
     assert_eq!(route.next_hop, ip(3));
 }
 
+// Verifies RERR messages are ignored when they arrive from a node that is not
+// the next hop for the affected route.
 #[test]
 fn rerr_from_non_next_hop_is_ignored() {
     let mut network = SimNetwork::new();

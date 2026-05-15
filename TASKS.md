@@ -20,6 +20,7 @@
 - [x] Fix the GitHub Actions sudo/rustup test failure.
 - [x] Add native macOS and Windows equivalents for interface selection instead of non-Linux placeholders.
 - [x] Add tag-gated crates.io publishing in CI and bump the crate to 0.2.0.
+- [x] Bump the crate to 0.2.1 for the next crates.io publish.
 - [x] Add rootless simulated end-to-end payload forwarding tests.
 - [x] Add rootless end-to-end payload tests for changing topologies.
 - [x] Add automated CI test coverage report artifacts and local just commands for tests/coverage.

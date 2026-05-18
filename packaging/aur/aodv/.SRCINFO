@@ -1,0 +1,17 @@
+pkgbase = aodv
+	pkgdesc = Userspace AODV control-plane implementation based on RFC 3561
+	pkgver = 0.2.1
+	pkgrel = 1
+	url = https://github.com/Fierthraix/aodv-rs
+	arch = x86_64
+	arch = aarch64
+	license = MIT OR Apache-2.0
+	makedepends = cargo
+	depends = gcc-libs
+	depends = glibc
+	conflicts = aodv-bin
+	conflicts = aodv-git
+	source = aodv-0.2.1.crate::https://static.crates.io/crates/aodv/aodv-0.2.1.crate
+	sha256sums = 2777fdd833a0dc813140b02a918d15ab8cf800ea93e3232852d7d11f0fc98725
+
+pkgname = aodv

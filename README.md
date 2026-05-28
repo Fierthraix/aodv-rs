@@ -1,10 +1,14 @@
 # aodv
 
 [![CI](https://github.com/Fierthraix/aodv-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Fierthraix/aodv-rs/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Fierthraix/aodv-rs?display_name=tag)](https://github.com/Fierthraix/aodv-rs/releases)
 [![Crates.io](https://img.shields.io/crates/v/aodv.svg)](https://crates.io/crates/aodv)
 [![Downloads](https://img.shields.io/crates/d/aodv.svg)](https://crates.io/crates/aodv)
 [![Docs.rs](https://docs.rs/aodv/badge.svg)](https://docs.rs/aodv)
 [![License](https://img.shields.io/crates/l/aodv.svg)](Cargo.toml)
+[![AUR](https://img.shields.io/aur/version/aodv)](https://aur.archlinux.org/packages/aodv)
+[![AUR bin](https://img.shields.io/aur/version/aodv-bin)](https://aur.archlinux.org/packages/aodv-bin)
+[![AUR git](https://img.shields.io/aur/version/aodv-git)](https://aur.archlinux.org/packages/aodv-git)
 
 Userspace AODV control-plane implementation based on RFC 3561.
 
@@ -12,6 +16,21 @@ Userspace AODV control-plane implementation based on RFC 3561.
 
 ```bash
 cargo install aodv
+yay -S aodv
+yay -S aodv-bin
+yay -S aodv-git
+brew tap Fierthraix/tap
+brew install --cask aodv
+nix run github:Fierthraix/nur-packages#aodv
+```
+
+```powershell
+scoop bucket add fierthraix https://github.com/Fierthraix/scoop-bucket
+scoop install aodv
+```
+
+```text
+deb/rpm/apk/tar/zip: https://github.com/Fierthraix/aodv-rs/releases
 ```
 
 ## Platform support

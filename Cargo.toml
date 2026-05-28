@@ -1,6 +1,6 @@
 [package]
 name = "aodv"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Userspace AODV control-plane implementation based on RFC 3561"
 license = "MIT OR Apache-2.0"

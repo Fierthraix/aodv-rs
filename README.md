@@ -14,23 +14,43 @@ Userspace AODV control-plane implementation based on RFC 3561.
 
 ## Installation
 
+### Cargo
+
 ```bash
 cargo install aodv
+```
+
+### Arch Linux / AUR
+
+```bash
 yay -S aodv
 yay -S aodv-bin
 yay -S aodv-git
-brew tap Fierthraix/tap
-brew install --cask aodv
-nix run github:Fierthraix/nur-packages#aodv
 ```
+
+### macOS / Homebrew
+
+```zsh
+brew install --cask Fierthraix/tap/aodv
+```
+
+### Windows / Scoop
 
 ```powershell
 scoop bucket add fierthraix https://github.com/Fierthraix/scoop-bucket
 scoop install aodv
 ```
 
+### Nix
+
+```bash
+nix profile install github:Fierthraix/nur-packages#aodv
+```
+
+### Release Assets
+
 ```text
-deb/rpm/apk/tar/zip: https://github.com/Fierthraix/aodv-rs/releases
+https://github.com/Fierthraix/aodv-rs/releases/latest
 ```
 
 ## Platform support

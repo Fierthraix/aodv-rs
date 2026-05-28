@@ -1,0 +1,95 @@
+version: 2
+
+project_name: aodv
+
+builds:
+  - id: aodv
+    builder: rust
+    binary: aodv
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+      - x86_64-pc-windows-gnu
+    flags:
+      - --release
+      - --locked
+      - --all-features
+
+archives:
+  - id: archives
+    ids:
+      - aodv
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Target }}"
+    wrap_in_directory: "{{ .ProjectName }}-{{ .Version }}-{{ .Target }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README*
+      - LICENSE*
+      - CHANGELOG*
+      - NOTICE*
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: aodv
+    ids:
+      - archives
+    repository:
+      owner: Fierthraix
+      name: homebrew-tap
+      token: "{{ .Env.RELEASE_PUBLISH_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/Fierthraix/aodv-rs
+    description: Userspace AODV control-plane implementation based on RFC 3561
+    license: MIT
+    binaries:
+      - aodv
+scoops:
+  - name: aodv
+    ids:
+      - archives
+    repository:
+      owner: Fierthraix
+      name: scoop-bucket
+      token: "{{ .Env.RELEASE_PUBLISH_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/Fierthraix/aodv-rs
+    description: Userspace AODV control-plane implementation based on RFC 3561
+    license: MIT
+
+nix:
+  - name: aodv
+    ids:
+      - archives
+    repository:
+      owner: Fierthraix
+      name: nur-packages
+      token: "{{ .Env.RELEASE_PUBLISH_TOKEN }}"
+    path: pkgs/aodv/default.nix
+    homepage: https://github.com/Fierthraix/aodv-rs
+    description: Userspace AODV control-plane implementation based on RFC 3561
+    license: mit
+
+nfpms:
+  - id: packages
+    ids:
+      - aodv
+    package_name: aodv
+    vendor: Fierthraix
+    homepage: https://github.com/Fierthraix/aodv-rs
+    maintainer: Fierthraix
+    description: Userspace AODV control-plane implementation based on RFC 3561
+    license: MIT
+    bindir: /usr/bin
+    formats:
+      - deb
+      - rpm
+      - apk
